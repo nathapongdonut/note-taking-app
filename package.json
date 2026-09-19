@@ -4,8 +4,12 @@
   "description": "A local-first personal knowledge base with hexagonal architecture",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "notes": "./dist/bin/notes.js"
+  },
   "scripts": {
     "build": "tsc",
+    "notes": "node ./dist/bin/notes.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

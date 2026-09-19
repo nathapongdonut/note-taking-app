@@ -9,3 +9,6 @@ dist/
 
 # Agentic files
 .agents/*
+
+# Local note vault
+vault/
