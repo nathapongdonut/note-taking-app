@@ -1,0 +1,28 @@
+{
+  "name": "note-taking-app",
+  "version": "0.1.0",
+  "description": "A local-first personal knowledge base with hexagonal architecture",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "notes",
+    "knowledge-base",
+    "hexagonal-architecture",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
+}
