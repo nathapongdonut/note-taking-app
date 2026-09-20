@@ -242,7 +242,8 @@ export class KnowledgeBaseService {
     type RollbackAction =
       | { type: "save"; note: Note }
       | { type: "delete"; title: string }
-      | { type: "indexRename"; oldTitle: string; newTitle: string };
+      | { type: "indexRename"; oldTitle: string; newTitle: string }
+      | { type: "indexUpsert"; record: NoteRecord };
 
     const rollbackStack: RollbackAction[] = [];
     const updatedReferencingNotes: string[] = [];
@@ -300,6 +301,9 @@ export class KnowledgeBaseService {
         const meta = await this.indexStore.getNoteMetadata(refTitle);
         const savedNote = await this.noteRepo.get(refTitle);
         if (savedNote) {
+          if (meta) {
+            rollbackStack.push({ type: "indexUpsert", record: meta });
+          }
           await this.indexStore.upsertNote({
             title: refTitle,
             filePath: meta?.filePath ?? `${refTitle}.md`,
@@ -328,6 +332,8 @@ export class KnowledgeBaseService {
             await this.noteRepo.delete(action.title);
           } else if (action.type === "indexRename") {
             await this.indexStore.renameNote(action.newTitle, action.oldTitle);
+          } else if (action.type === "indexUpsert") {
+            await this.indexStore.upsertNote(action.record);
           }
         } catch {
           // preserve original error

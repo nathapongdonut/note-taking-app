@@ -8,15 +8,7 @@ export interface NoteRecord {
   links?: string[];
 }
 
-export interface NoteMetadata {
-  title: string;
-  filePath: string;
-  mtime: number;
-  createdAt?: string;
-  updatedAt?: string;
-  tags: string[];
-  links?: string[];
-}
+export type NoteMetadata = NoteRecord;
 
 export interface GhostNoteRecord {
   targetTitle: string;

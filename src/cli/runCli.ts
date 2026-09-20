@@ -22,7 +22,7 @@ Commands:
   backlinks <title>                                         List incoming backlinks for a note
   ghost-notes                                               List Ghost Notes referenced via Wiki-links
   rename <old-title> <new-title>                            Rename note and refactor incoming Wiki-links
-  sync                                                      Synchronize SQLite index with Vault files
+  sync                                                      Reconcile Index with Vault notes
 `);
     return 0;
   }

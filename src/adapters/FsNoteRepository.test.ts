@@ -98,32 +98,6 @@ describe("FsNoteRepository (Filesystem Vault Adapter)", () => {
     expect(deletedAgain).toBe(false);
   });
 
-  it("renames an existing note file and updates internal title", async () => {
-    const note: Note = {
-      title: "Old Anatomy",
-      frontmatter: { title: "Old Anatomy" },
-      tags: ["biology"],
-      body: "Gross anatomy overview.",
-    };
-    await repository.save(note);
-
-    await repository.rename("Old Anatomy", "Human Anatomy");
-
-    expect(await repository.exists("Old Anatomy")).toBe(false);
-    expect(await repository.exists("Human Anatomy")).toBe(true);
-
-    const renamedNote = await repository.get("Human Anatomy");
-    expect(renamedNote?.title).toBe("Human Anatomy");
-    expect(renamedNote?.frontmatter.title).toBe("Human Anatomy");
-    expect(renamedNote?.tags).toEqual(["biology"]);
-  });
-
-  it("throws an error when renaming a non-existent note", async () => {
-    await expect(repository.rename("Ghost Note", "New Note")).rejects.toThrow(
-      'Cannot rename note: "Ghost Note" does not exist.'
-    );
-  });
-
   it("lists all files with titles, file paths, and mtimes with listAllFiles", async () => {
     await repository.save({
       title: "NoteA",

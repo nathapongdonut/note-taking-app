@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { GhostNoteRecord, IndexStore, NoteMetadata, NoteRecord } from "../ports/IndexStore.js";
 
@@ -236,11 +237,12 @@ export class SqliteIndexStore implements IndexStore {
       const nowIso = new Date().toISOString();
       const nowMtime = Date.now();
       const oldPath = oldRecord.file_path;
-      const lastSlash = Math.max(oldPath.lastIndexOf("/"), oldPath.lastIndexOf("\\"));
-      const dir = lastSlash >= 0 ? oldPath.slice(0, lastSlash + 1) : "";
-      const dotIndex = oldPath.lastIndexOf(".");
-      const ext = dotIndex > lastSlash ? oldPath.slice(dotIndex) : ".md";
-      const targetFilePath = `${dir}${trimmedNew}${ext}`;
+      const normalizedPath = oldPath.replace(/\\/g, "/");
+      const parsedPath = path.posix.parse(normalizedPath);
+      const ext = parsedPath.ext || ".md";
+      const targetFilePath = parsedPath.dir
+        ? `${parsedPath.dir}/${trimmedNew}${ext}`
+        : `${trimmedNew}${ext}`;
 
       this.db
         .prepare("UPDATE notes SET title = ?, file_path = ?, mtime = ?, updated_at = ? WHERE title = ?")
