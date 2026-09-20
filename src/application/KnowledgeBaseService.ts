@@ -27,10 +27,14 @@ export interface RenameNoteResult {
 export type { ReconciliationResult };
 
 export class KnowledgeBaseService {
+  private readonly reconciler: ReconciliationService;
+
   constructor(
     private readonly noteRepo: NoteRepository,
     private readonly indexStore: IndexStore
-  ) {}
+  ) {
+    this.reconciler = new ReconciliationService(this.noteRepo, this.indexStore);
+  }
 
   /**
    * Creates a new Note, persists it to the Vault as markdown, and indexes it in SQLite.
@@ -273,6 +277,7 @@ export class KnowledgeBaseService {
       rollbackStack.push({ type: "save", note: oldNote });
 
       // 2. Refactor incoming Wiki-links across all referencing notes
+      const updatedNotesMap = new Map<string, Note>();
       for (const [refTitle, refNote] of referencingNotesMap.entries()) {
         const newRefBody = RefactorService.refactorWikiLinks(refNote.body, trimmedOld, trimmedNew);
         const refLinks = NoteParser.extractWikiLinks(newRefBody);
@@ -289,7 +294,17 @@ export class KnowledgeBaseService {
 
         await this.noteRepo.save(updatedRefNote);
         rollbackStack.push({ type: "save", note: refNote });
+        updatedNotesMap.set(refTitle, updatedRefNote);
         updatedReferencingNotes.push(refTitle);
+      }
+
+      // Snapshot pre-rename index state of referencing notes before index mutations for rollback
+      const priorReferencingMeta = new Map<string, NoteRecord>();
+      for (const refTitle of updatedReferencingNotes) {
+        const meta = await this.indexStore.getNoteMetadata(refTitle);
+        if (meta) {
+          priorReferencingMeta.set(refTitle, meta);
+        }
       }
 
       // 3. Update SQLite index
@@ -298,20 +313,20 @@ export class KnowledgeBaseService {
 
       // Reconcile index for updated referencing notes so outbound links and mtimes match new body
       for (const refTitle of updatedReferencingNotes) {
-        const meta = await this.indexStore.getNoteMetadata(refTitle);
-        const savedNote = await this.noteRepo.get(refTitle);
-        if (savedNote) {
-          if (meta) {
-            rollbackStack.push({ type: "indexUpsert", record: meta });
-          }
+        const priorMeta = priorReferencingMeta.get(refTitle);
+        if (priorMeta) {
+          rollbackStack.push({ type: "indexUpsert", record: priorMeta });
+        }
+        const updatedNote = updatedNotesMap.get(refTitle);
+        if (updatedNote) {
           await this.indexStore.upsertNote({
             title: refTitle,
-            filePath: meta?.filePath ?? `${refTitle}.md`,
+            filePath: priorMeta?.filePath ?? `${refTitle}.md`,
             mtime: Date.now(),
-            createdAt: meta?.createdAt,
-            updatedAt: typeof savedNote.frontmatter.updatedAt === "string" ? savedNote.frontmatter.updatedAt : undefined,
-            tags: savedNote.tags,
-            links: savedNote.links,
+            createdAt: priorMeta?.createdAt,
+            updatedAt: typeof updatedNote.frontmatter.updatedAt === "string" ? updatedNote.frontmatter.updatedAt : undefined,
+            tags: updatedNote.tags,
+            links: updatedNote.links,
           });
         }
       }
@@ -347,7 +362,6 @@ export class KnowledgeBaseService {
    * Reconciles the SQLite Index with the physical Vault files on disk.
    */
   async reconcile(): Promise<ReconciliationResult> {
-    const reconciler = new ReconciliationService(this.noteRepo, this.indexStore);
-    return reconciler.reconcile();
+    return this.reconciler.reconcile();
   }
 }

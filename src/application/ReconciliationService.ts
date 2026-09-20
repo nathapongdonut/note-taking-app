@@ -1,4 +1,4 @@
-import type { NoteRepository } from "../ports/NoteRepository.js";
+import type { NoteFileInfo, NoteRepository } from "../ports/NoteRepository.js";
 import type { IndexStore } from "../ports/IndexStore.js";
 
 export interface ReconciliationResult {
@@ -63,7 +63,7 @@ export class ReconciliationService {
   }
 
   private async indexNoteFromDisk(
-    diskFile: { title: string; filePath: string; mtime: number },
+    diskFile: NoteFileInfo,
     fallbackCreatedAt?: string
   ): Promise<boolean> {
     const note = await this.noteRepo.get(diskFile.title);

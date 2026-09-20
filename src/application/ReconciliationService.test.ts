@@ -35,16 +35,6 @@ class InMemoryNoteRepository implements NoteRepository {
     return this.notes.has(title);
   }
 
-  async rename(oldTitle: string, newTitle: string): Promise<void> {
-    const note = this.notes.get(oldTitle);
-    if (note) {
-      this.notes.delete(oldTitle);
-      this.fileInfos.delete(oldTitle);
-      note.title = newTitle;
-      this.save(note);
-    }
-  }
-
   async listAllFiles(): Promise<NoteFileInfo[]> {
     return Array.from(this.fileInfos.values());
   }

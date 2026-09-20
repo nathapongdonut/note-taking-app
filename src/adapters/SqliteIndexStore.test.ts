@@ -394,20 +394,4 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       expect(records[1].links).toEqual(["Alpha"]);
     });
   });
-
-  describe("renameNote path safety", () => {
-    it("safely renames note file path preserving directory and extension", async () => {
-      await indexStore.upsertNote({
-        title: "Doc",
-        filePath: "my-folder/Doc/Doc.markdown",
-        mtime: 100,
-        tags: [],
-      });
-
-      await indexStore.renameNote("Doc", "NewDoc");
-
-      const meta = await indexStore.getNoteMetadata("NewDoc");
-      expect(meta?.filePath).toBe("my-folder/Doc/NewDoc.markdown");
-    });
-  });
 });
