@@ -19,6 +19,8 @@ Commands:
   create <title> [--body "<text>"] [--tags "<tag1,tag2>"]   Create a new note
   view <title>                                              View a note's content
   search --tag <tag>                                        Search notes by tag
+  backlinks <title>                                         List incoming backlinks for a note
+  ghost-notes                                               List Ghost Notes referenced via Wiki-links
 `);
     return 0;
   }
@@ -66,6 +68,8 @@ Commands:
           return 1;
         }
 
+        const backlinks = await service.getBacklinks(note.title);
+
         io.log(`========================================`);
         io.log(`Title: ${note.title}`);
         if (note.tags.length > 0) {
@@ -73,6 +77,16 @@ Commands:
         }
         io.log(`========================================\n`);
         io.log(note.body || "(empty note body)");
+        io.log(`\n========================================`);
+        if (backlinks.length === 0) {
+          io.log(`Backlinks: (none)`);
+        } else {
+          io.log(`Backlinks:`);
+          for (const link of backlinks) {
+            io.log(`  • ${link}`);
+          }
+        }
+        io.log(`========================================`);
         return 0;
       }
 
@@ -97,6 +111,38 @@ Commands:
           io.log(`Notes matching tag "${tagToSearch}":`);
           for (const t of matchingTitles) {
             io.log(`  • ${t}`);
+          }
+        }
+        return 0;
+      }
+
+      case "backlinks": {
+        const title = rest[0];
+        if (!title) {
+          io.error("Error: Please specify the note title to find backlinks for.");
+          return 1;
+        }
+
+        const backlinks = await service.getBacklinks(title);
+        if (backlinks.length === 0) {
+          io.log(`No backlinks found for "${title}".`);
+        } else {
+          io.log(`Backlinks for "${title}":`);
+          for (const link of backlinks) {
+            io.log(`  • ${link}`);
+          }
+        }
+        return 0;
+      }
+
+      case "ghost-notes": {
+        const ghostNotes = await service.getGhostNotes();
+        if (ghostNotes.length === 0) {
+          io.log("No ghost notes found.");
+        } else {
+          io.log("Ghost notes:");
+          for (const ghost of ghostNotes) {
+            io.log(`  • ${ghost.targetTitle} (referenced by: ${ghost.referencedBy.join(", ")})`);
           }
         }
         return 0;

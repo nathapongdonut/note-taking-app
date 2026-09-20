@@ -1,7 +1,7 @@
 import type { Note, NoteFrontmatter } from "../domain/Note.js";
 import { NoteParser } from "../domain/NoteParser.js";
 import type { NoteRepository } from "../ports/NoteRepository.js";
-import type { IndexStore, NoteRecord } from "../ports/IndexStore.js";
+import type { GhostNoteRecord, IndexStore, NoteRecord } from "../ports/IndexStore.js";
 
 export interface CreateNoteInput {
   title: string;
@@ -167,6 +167,20 @@ export class KnowledgeBaseService {
    */
   async getOutboundLinks(title: string): Promise<string[]> {
     return this.indexStore.getOutboundLinks(title.trim());
+  }
+
+  /**
+   * Retrieves all incoming Backlinks for a given note title.
+   */
+  async getBacklinks(title: string): Promise<string[]> {
+    return this.indexStore.getBacklinks(title.trim());
+  }
+
+  /**
+   * Retrieves all Ghost Notes (concepts referenced via Wiki-links that do not exist as notes).
+   */
+  async getGhostNotes(): Promise<GhostNoteRecord[]> {
+    return this.indexStore.getGhostNotes();
   }
 
   /**

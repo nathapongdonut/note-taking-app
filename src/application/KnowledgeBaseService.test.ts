@@ -136,4 +136,116 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
 
     expect(await service.getOutboundLinks("EphemeralNote")).toEqual([]);
   });
+
+  it("retrieves incoming backlinks through KnowledgeBaseService", async () => {
+    await service.createNote({
+      title: "DocA",
+      body: "References [[CentralTopic]].",
+    });
+    await service.createNote({
+      title: "DocB",
+      body: "Also references [[CentralTopic]] and [[OtherTopic]].",
+    });
+    await service.createNote({
+      title: "CentralTopic",
+      body: "Core topic definition.",
+    });
+
+    const backlinks = await service.getBacklinks("CentralTopic");
+    expect(backlinks).toEqual(["DocA", "DocB"]);
+
+    const otherBacklinks = await service.getBacklinks("OtherTopic");
+    expect(otherBacklinks).toEqual(["DocB"]);
+
+    const nonReferenced = await service.getBacklinks("DocA");
+    expect(nonReferenced).toEqual([]);
+  });
+
+  it("discovers ghost notes across the vault and resolves them when authored", async () => {
+    await service.createNote({
+      title: "Architecture",
+      body: "Mentions [[HexagonalPattern]] and [[EventDrivenPattern]].",
+    });
+
+    const initialGhosts = await service.getGhostNotes();
+    expect(initialGhosts).toEqual([
+      { targetTitle: "EventDrivenPattern", referencedBy: ["Architecture"] },
+      { targetTitle: "HexagonalPattern", referencedBy: ["Architecture"] },
+    ]);
+
+    // Now author HexagonalPattern
+    await service.createNote({
+      title: "HexagonalPattern",
+      body: "Ports and Adapters architecture.",
+    });
+
+    const afterAuthoringGhosts = await service.getGhostNotes();
+    expect(afterAuthoringGhosts).toEqual([
+      { targetTitle: "EventDrivenPattern", referencedBy: ["Architecture"] },
+    ]);
+  });
+
+  it("handles complex vault graph topologies (cyclic, self-referential, diamond, isolated)", async () => {
+    // 1. Self-referential note
+    await service.createNote({
+      title: "Recursion",
+      body: "See [[Recursion]] for recursion.",
+    });
+
+    // 2. Cyclic loop: CyclicA -> CyclicB -> CyclicA
+    await service.createNote({
+      title: "CyclicA",
+      body: "Points to [[CyclicB]].",
+    });
+    await service.createNote({
+      title: "CyclicB",
+      body: "Points back to [[CyclicA]] and points to [[UnauthoredGhost]].",
+    });
+
+    // 3. Diamond pattern: DiamRoot -> DiamLeft & DiamRight -> DiamLeaf
+    await service.createNote({
+      title: "DiamRoot",
+      body: "Branches to [[DiamLeft]] and [[DiamRight]].",
+    });
+    await service.createNote({
+      title: "DiamLeft",
+      body: "Converges to [[DiamLeaf]].",
+    });
+    await service.createNote({
+      title: "DiamRight",
+      body: "Converges to [[DiamLeaf]].",
+    });
+    await service.createNote({
+      title: "DiamLeaf",
+      body: "Terminal node.",
+    });
+
+    // 4. Isolated node
+    await service.createNote({
+      title: "Island",
+      body: "No connections anywhere.",
+    });
+
+    // Assert self-reference
+    expect(await service.getBacklinks("Recursion")).toEqual(["Recursion"]);
+
+    // Assert cyclic backlinks
+    expect(await service.getBacklinks("CyclicA")).toEqual(["CyclicB"]);
+    expect(await service.getBacklinks("CyclicB")).toEqual(["CyclicA"]);
+
+    // Assert diamond convergence
+    expect(await service.getBacklinks("DiamLeaf")).toEqual(["DiamLeft", "DiamRight"]);
+    expect(await service.getBacklinks("DiamLeft")).toEqual(["DiamRoot"]);
+    expect(await service.getBacklinks("DiamRight")).toEqual(["DiamRoot"]);
+
+    // Assert isolated node has no backlinks
+    expect(await service.getBacklinks("Island")).toEqual([]);
+
+    // Assert ghost note in cyclic structure
+    const ghosts = await service.getGhostNotes();
+    expect(ghosts.find((g) => g.targetTitle === "UnauthoredGhost")).toEqual({
+      targetTitle: "UnauthoredGhost",
+      referencedBy: ["CyclicB"],
+    });
+  });
 });

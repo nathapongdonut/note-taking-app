@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { IndexStore, NoteMetadata, NoteRecord } from "../ports/IndexStore.js";
+import type { GhostNoteRecord, IndexStore, NoteMetadata, NoteRecord } from "../ports/IndexStore.js";
 
 export class SqliteIndexStore implements IndexStore {
   private readonly db: DatabaseSync;
@@ -159,6 +159,39 @@ export class SqliteIndexStore implements IndexStore {
     `);
     const rows = stmt.all(title.trim()) as Array<{ target_title: string }>;
     return rows.map((r) => r.target_title);
+  }
+
+  async getBacklinks(title: string): Promise<string[]> {
+    const stmt = this.db.prepare(`
+      SELECT source_title FROM links WHERE target_title = ? ORDER BY source_title ASC
+    `);
+    const rows = stmt.all(title.trim()) as Array<{ source_title: string }>;
+    return rows.map((r) => r.source_title);
+  }
+
+  async getGhostNotes(): Promise<GhostNoteRecord[]> {
+    const stmt = this.db.prepare(`
+      SELECT target_title, source_title
+      FROM links
+      WHERE target_title NOT IN (SELECT title FROM notes)
+      ORDER BY target_title ASC, source_title ASC
+    `);
+    const rows = stmt.all() as Array<{ target_title: string; source_title: string }>;
+
+    const ghostMap = new Map<string, string[]>();
+    for (const row of rows) {
+      let list = ghostMap.get(row.target_title);
+      if (!list) {
+        list = [];
+        ghostMap.set(row.target_title, list);
+      }
+      list.push(row.source_title);
+    }
+
+    return Array.from(ghostMap.entries()).map(([targetTitle, referencedBy]) => ({
+      targetTitle,
+      referencedBy,
+    }));
   }
 
   async listAllIndexedTitles(): Promise<string[]> {
