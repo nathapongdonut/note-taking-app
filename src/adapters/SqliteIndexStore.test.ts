@@ -356,4 +356,42 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       );
     });
   });
+
+  describe("getAllNotesMetadata", () => {
+    it("returns empty array when index is empty", async () => {
+      const records = await indexStore.getAllNotesMetadata();
+      expect(records).toEqual([]);
+    });
+
+    it("retrieves all notes with their metadata, tags, and links", async () => {
+      await indexStore.upsertNote({
+        title: "Beta",
+        filePath: "Beta.md",
+        mtime: 200,
+        createdAt: "2026-01-01T00:00:00Z",
+        tags: ["tagB"],
+        links: ["Alpha"],
+      });
+
+      await indexStore.upsertNote({
+        title: "Alpha",
+        filePath: "Alpha.md",
+        mtime: 100,
+        tags: ["tagA1", "tagA2"],
+        links: ["Beta", "Ghost"],
+      });
+
+      const records = await indexStore.getAllNotesMetadata();
+      expect(records.length).toBe(2);
+      expect(records[0].title).toBe("Alpha");
+      expect(records[0].mtime).toBe(100);
+      expect(records[0].tags).toEqual(["tagA1", "tagA2"]);
+      expect(records[0].links).toEqual(["Beta", "Ghost"]);
+
+      expect(records[1].title).toBe("Beta");
+      expect(records[1].mtime).toBe(200);
+      expect(records[1].tags).toEqual(["tagB"]);
+      expect(records[1].links).toEqual(["Alpha"]);
+    });
+  });
 });

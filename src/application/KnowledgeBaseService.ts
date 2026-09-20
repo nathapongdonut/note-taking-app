@@ -1,6 +1,7 @@
 import type { Note, NoteFrontmatter } from "../domain/Note.js";
 import { NoteParser } from "../domain/NoteParser.js";
 import { RefactorService } from "../domain/RefactorService.js";
+import { ReconciliationService, type ReconciliationResult } from "./ReconciliationService.js";
 import type { NoteRepository } from "../ports/NoteRepository.js";
 import type { GhostNoteRecord, IndexStore, NoteRecord } from "../ports/IndexStore.js";
 
@@ -22,6 +23,8 @@ export interface RenameNoteResult {
   newTitle: string;
   updatedReferencingNotes: string[];
 }
+
+export type { ReconciliationResult };
 
 export class KnowledgeBaseService {
   constructor(
@@ -328,5 +331,13 @@ export class KnowledgeBaseService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Reconciles the SQLite Index with the physical Vault files on disk.
+   */
+  async reconcile(): Promise<ReconciliationResult> {
+    const reconciler = new ReconciliationService(this.noteRepo, this.indexStore);
+    return reconciler.reconcile();
   }
 }

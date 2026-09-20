@@ -22,11 +22,18 @@ Commands:
   backlinks <title>                                         List incoming backlinks for a note
   ghost-notes                                               List Ghost Notes referenced via Wiki-links
   rename <old-title> <new-title>                            Rename note and refactor incoming Wiki-links
+  sync                                                      Synchronize SQLite index with Vault files
 `);
     return 0;
   }
 
   try {
+    // Run fast reconciliation on startup before executing queries
+    const queryCommands = new Set(["view", "search", "backlinks", "ghost-notes", "rename"]);
+    if (queryCommands.has(command)) {
+      await service.reconcile();
+    }
+
     switch (command) {
       case "create": {
         const title = rest[0];
@@ -172,6 +179,20 @@ Commands:
           for (const title of result.updatedReferencingNotes) {
             io.log(`  • ${title}`);
           }
+        }
+        return 0;
+      }
+
+      case "sync": {
+        const result = await service.reconcile();
+        const totalChanges = result.added.length + result.modified.length + result.deleted.length;
+        if (totalChanges === 0) {
+          io.log("Vault is up to date. No changes detected.");
+        } else {
+          io.log("Reconciliation complete:");
+          io.log(`  • Added: ${result.added.length} note(s)${result.added.length > 0 ? ` (${result.added.join(", ")})` : ""}`);
+          io.log(`  • Updated: ${result.modified.length} note(s)${result.modified.length > 0 ? ` (${result.modified.join(", ")})` : ""}`);
+          io.log(`  • Removed: ${result.deleted.length} note(s)${result.deleted.length > 0 ? ` (${result.deleted.join(", ")})` : ""}`);
         }
         return 0;
       }

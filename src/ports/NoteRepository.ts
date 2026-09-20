@@ -1,5 +1,11 @@
 import type { Note } from "../domain/Note.js";
 
+export interface NoteFileInfo {
+  title: string;
+  filePath: string;
+  mtime: number;
+}
+
 /**
  * Port interface for storing and retrieving Notes.
  * Implementation adapters handle physical persistence (Filesystem, Cloud, In-Memory, etc.).
@@ -34,4 +40,14 @@ export interface NoteRepository {
    * Renames a Note from an old title to a new title in storage.
    */
   rename(oldTitle: string, newTitle: string): Promise<void>;
+
+  /**
+   * Retrieves physical file information including mtime for a note.
+   */
+  getFileInfo(title: string): Promise<NoteFileInfo | null>;
+
+  /**
+   * Lists physical file information including mtime for all notes in the Vault.
+   */
+  listAllFiles(): Promise<NoteFileInfo[]>;
 }
