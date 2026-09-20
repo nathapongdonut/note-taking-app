@@ -270,4 +270,90 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       { targetTitle: "GhostBeta", referencedBy: ["NoteA"] },
     ]);
   });
+
+  describe("renameNote", () => {
+    it("renames a note record and updates filePath in metadata", async () => {
+      await indexStore.upsertNote({
+        title: "OldTopic",
+        filePath: "/vault/OldTopic.md",
+        mtime: 100,
+        tags: ["study"],
+        links: ["Reference"],
+      });
+
+      await indexStore.renameNote("OldTopic", "NewTopic");
+
+      expect(await indexStore.getNoteMetadata("OldTopic")).toBeNull();
+
+      const newMeta = await indexStore.getNoteMetadata("NewTopic");
+      expect(newMeta).not.toBeNull();
+      expect(newMeta?.title).toBe("NewTopic");
+      expect(newMeta?.filePath).toBe("/vault/NewTopic.md");
+      expect(newMeta?.tags).toEqual(["study"]);
+      expect(newMeta?.links).toEqual(["Reference"]);
+    });
+
+    it("cascades inbound and outbound link relationships upon rename", async () => {
+      // SourceA -> OldTopic -> TargetZ
+      await indexStore.upsertNote({
+        title: "SourceA",
+        filePath: "/vault/SourceA.md",
+        mtime: 1,
+        tags: [],
+        links: ["OldTopic"],
+      });
+      await indexStore.upsertNote({
+        title: "OldTopic",
+        filePath: "/vault/OldTopic.md",
+        mtime: 2,
+        tags: [],
+        links: ["TargetZ"],
+      });
+      await indexStore.upsertNote({
+        title: "TargetZ",
+        filePath: "/vault/TargetZ.md",
+        mtime: 3,
+        tags: [],
+        links: [],
+      });
+
+      await indexStore.renameNote("OldTopic", "NewTopic");
+
+      // Inbound links to OldTopic should now target NewTopic
+      expect(await indexStore.getBacklinks("OldTopic")).toEqual([]);
+      expect(await indexStore.getBacklinks("NewTopic")).toEqual(["SourceA"]);
+
+      // Outbound links from OldTopic should now originate from NewTopic
+      expect(await indexStore.getOutboundLinks("OldTopic")).toEqual([]);
+      expect(await indexStore.getOutboundLinks("NewTopic")).toEqual(["TargetZ"]);
+
+      // TargetZ backlinks should now reflect NewTopic instead of OldTopic
+      expect(await indexStore.getBacklinks("TargetZ")).toEqual(["NewTopic"]);
+    });
+
+    it("throws error if oldTitle does not exist", async () => {
+      await expect(indexStore.renameNote("NonExistent", "NewName")).rejects.toThrow(
+        'Cannot rename note: "NonExistent" does not exist in the index.'
+      );
+    });
+
+    it("throws error if newTitle already exists", async () => {
+      await indexStore.upsertNote({
+        title: "First",
+        filePath: "/vault/First.md",
+        mtime: 1,
+        tags: [],
+      });
+      await indexStore.upsertNote({
+        title: "Second",
+        filePath: "/vault/Second.md",
+        mtime: 2,
+        tags: [],
+      });
+
+      await expect(indexStore.renameNote("First", "Second")).rejects.toThrow(
+        'Cannot rename note: "Second" already exists in the index.'
+      );
+    });
+  });
 });

@@ -21,6 +21,7 @@ Commands:
   search --tag <tag>                                        Search notes by tag
   backlinks <title>                                         List incoming backlinks for a note
   ghost-notes                                               List Ghost Notes referenced via Wiki-links
+  rename <old-title> <new-title>                            Rename note and refactor incoming Wiki-links
 `);
     return 0;
   }
@@ -143,6 +144,33 @@ Commands:
           io.log("Ghost notes:");
           for (const ghost of ghostNotes) {
             io.log(`  • ${ghost.targetTitle} (referenced by: ${ghost.referencedBy.join(", ")})`);
+          }
+        }
+        return 0;
+      }
+
+      case "rename": {
+        const oldTitle = rest[0];
+        const newTitle = rest[1];
+
+        if (!oldTitle || !newTitle || oldTitle.startsWith("--") || newTitle.startsWith("--")) {
+          io.error("Error: Please provide both old and new note titles: notes rename <old-title> <new-title>.");
+          return 1;
+        }
+
+        const result = await service.renameNote(oldTitle, newTitle);
+        io.log(`Renamed note "${result.oldTitle}" to "${result.newTitle}".`);
+        io.log("Modified files:");
+        io.log(`  • ${result.newTitle}.md`);
+        for (const title of result.updatedReferencingNotes) {
+          io.log(`  • ${title}.md`);
+        }
+        if (result.updatedReferencingNotes.length === 0) {
+          io.log("No referencing notes needed updates.");
+        } else {
+          io.log(`Updated ${result.updatedReferencingNotes.length} referencing note(s):`);
+          for (const title of result.updatedReferencingNotes) {
+            io.log(`  • ${title}`);
           }
         }
         return 0;

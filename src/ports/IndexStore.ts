@@ -68,6 +68,11 @@ export interface IndexStore {
   listAllIndexedTitles(): Promise<string[]>;
 
   /**
+   * Renames an indexed note and cascades changes to tags and link edges.
+   */
+  renameNote(oldTitle: string, newTitle: string): Promise<void>;
+
+  /**
    * Closes the index connection.
    */
   close(): Promise<void>;

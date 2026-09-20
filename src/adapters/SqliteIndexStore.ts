@@ -24,7 +24,7 @@ export class SqliteIndexStore implements IndexStore {
         note_title TEXT NOT NULL,
         tag TEXT NOT NULL,
         PRIMARY KEY (note_title, tag),
-        FOREIGN KEY (note_title) REFERENCES notes(title) ON DELETE CASCADE
+        FOREIGN KEY (note_title) REFERENCES notes(title) ON UPDATE CASCADE ON DELETE CASCADE
       );
 
       CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
@@ -33,7 +33,7 @@ export class SqliteIndexStore implements IndexStore {
         source_title TEXT NOT NULL,
         target_title TEXT NOT NULL,
         PRIMARY KEY (source_title, target_title),
-        FOREIGN KEY (source_title) REFERENCES notes(title) ON DELETE CASCADE
+        FOREIGN KEY (source_title) REFERENCES notes(title) ON UPDATE CASCADE ON DELETE CASCADE
       );
 
       CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_title);
@@ -198,6 +198,59 @@ export class SqliteIndexStore implements IndexStore {
     const stmt = this.db.prepare("SELECT title FROM notes ORDER BY title ASC");
     const rows = stmt.all() as Array<{ title: string }>;
     return rows.map((r) => r.title);
+  }
+
+  async renameNote(oldTitle: string, newTitle: string): Promise<void> {
+    const trimmedOld = oldTitle.trim();
+    const trimmedNew = newTitle.trim();
+
+    if (!trimmedOld || !trimmedNew) {
+      throw new Error("Note title cannot be empty.");
+    }
+
+    if (trimmedOld === trimmedNew) {
+      return;
+    }
+
+    const checkOldStmt = this.db.prepare("SELECT title, file_path FROM notes WHERE title = ?");
+    const oldRecord = checkOldStmt.get(trimmedOld) as { title: string; file_path: string } | undefined;
+    if (!oldRecord) {
+      throw new Error(`Cannot rename note: "${trimmedOld}" does not exist in the index.`);
+    }
+
+    const checkNewStmt = this.db.prepare("SELECT title FROM notes WHERE title = ?");
+    const newExists = checkNewStmt.get(trimmedNew);
+    if (newExists) {
+      throw new Error(`Cannot rename note: "${trimmedNew}" already exists in the index.`);
+    }
+
+    this.db.exec("BEGIN TRANSACTION;");
+    try {
+      // 1. Update inbound links: target_title = trimmedOld -> trimmedNew
+      this.db
+        .prepare("UPDATE OR IGNORE links SET target_title = ? WHERE target_title = ?")
+        .run(trimmedNew, trimmedOld);
+      this.db.prepare("DELETE FROM links WHERE target_title = ?").run(trimmedOld);
+
+      // 2. Update notes table, which cascades source_title in links and note_title in tags
+      const nowIso = new Date().toISOString();
+      const nowMtime = Date.now();
+      const oldPath = oldRecord.file_path;
+      const lastSlash = Math.max(oldPath.lastIndexOf("/"), oldPath.lastIndexOf("\\"));
+      const newFilePath =
+        lastSlash >= 0
+          ? `${oldPath.slice(0, lastSlash + 1)}${trimmedNew}.md`
+          : `${trimmedNew}.md`;
+
+      this.db
+        .prepare("UPDATE notes SET title = ?, file_path = ?, mtime = ?, updated_at = ? WHERE title = ?")
+        .run(trimmedNew, newFilePath, nowMtime, nowIso, trimmedOld);
+
+      this.db.exec("COMMIT;");
+    } catch (err) {
+      this.db.exec("ROLLBACK;");
+      throw err;
+    }
   }
 
   async close(): Promise<void> {

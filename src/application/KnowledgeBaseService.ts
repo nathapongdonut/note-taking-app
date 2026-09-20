@@ -1,5 +1,6 @@
 import type { Note, NoteFrontmatter } from "../domain/Note.js";
 import { NoteParser } from "../domain/NoteParser.js";
+import { RefactorService } from "../domain/RefactorService.js";
 import type { NoteRepository } from "../ports/NoteRepository.js";
 import type { GhostNoteRecord, IndexStore, NoteRecord } from "../ports/IndexStore.js";
 
@@ -14,6 +15,12 @@ export interface UpdateNoteInput {
   body?: string;
   tags?: string[];
   frontmatter?: Record<string, unknown>;
+}
+
+export interface RenameNoteResult {
+  oldTitle: string;
+  newTitle: string;
+  updatedReferencingNotes: string[];
 }
 
 export class KnowledgeBaseService {
@@ -188,5 +195,138 @@ export class KnowledgeBaseService {
    */
   async listAllTitles(): Promise<string[]> {
     return this.noteRepo.listTitles();
+  }
+
+  /**
+   * Renames a Note on disk and in the SQLite index, refactoring all incoming Wiki-links across the Vault.
+   * Protects vault consistency with an atomic rollback on disk write failures.
+   */
+  async renameNote(oldTitle: string, newTitle: string): Promise<RenameNoteResult> {
+    const trimmedOld = oldTitle.trim();
+    const trimmedNew = newTitle.trim();
+
+    if (!trimmedOld || !trimmedNew) {
+      throw new Error("Note title cannot be empty.");
+    }
+
+    if (trimmedOld === trimmedNew) {
+      return { oldTitle: trimmedOld, newTitle: trimmedNew, updatedReferencingNotes: [] };
+    }
+
+    const oldNote = await this.noteRepo.get(trimmedOld);
+    if (!oldNote) {
+      throw new Error(`Cannot rename note: "${trimmedOld}" does not exist.`);
+    }
+
+    if (await this.noteRepo.exists(trimmedNew)) {
+      throw new Error(`Cannot rename note: "${trimmedNew}" already exists.`);
+    }
+
+    // 1. Discover all referencing notes via index backlinks
+    const referencingTitles = await this.getBacklinks(trimmedOld);
+
+    // Snapshot referencing notes for atomic rollback
+    const referencingNotesMap = new Map<string, Note>();
+    for (const refTitle of referencingTitles) {
+      if (refTitle === trimmedOld) continue;
+      const refNote = await this.noteRepo.get(refTitle);
+      if (refNote) {
+        referencingNotesMap.set(refTitle, refNote);
+      }
+    }
+
+    // Track written files for atomic rollback
+    type RollbackAction =
+      | { type: "save"; note: Note }
+      | { type: "delete"; title: string };
+
+    const rollbackStack: RollbackAction[] = [];
+    const updatedReferencingNotes: string[] = [];
+
+    try {
+      // 1. Rename the main note file and update its title and self-referential links
+      const nowIso = new Date().toISOString();
+      const updatedBody = RefactorService.renameWikiLinks(oldNote.body, trimmedOld, trimmedNew);
+      const links = NoteParser.extractWikiLinks(updatedBody);
+
+      const renamedNote: Note = {
+        ...oldNote,
+        title: trimmedNew,
+        frontmatter: {
+          ...oldNote.frontmatter,
+          title: trimmedNew,
+          ...(oldNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
+        },
+        body: updatedBody,
+        links,
+      };
+
+      await this.noteRepo.save(renamedNote);
+      rollbackStack.push({ type: "delete", title: trimmedNew });
+
+      await this.noteRepo.delete(trimmedOld);
+      rollbackStack.push({ type: "save", note: oldNote });
+
+      // 2. Refactor incoming Wiki-links across all referencing notes
+      for (const [refTitle, refNote] of referencingNotesMap.entries()) {
+        const newRefBody = RefactorService.renameWikiLinks(refNote.body, trimmedOld, trimmedNew);
+        const refLinks = NoteParser.extractWikiLinks(newRefBody);
+
+        const updatedRefNote: Note = {
+          ...refNote,
+          body: newRefBody,
+          links: refLinks,
+          frontmatter: {
+            ...refNote.frontmatter,
+            ...(refNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
+          },
+        };
+
+        await this.noteRepo.save(updatedRefNote);
+        rollbackStack.push({ type: "save", note: refNote });
+        updatedReferencingNotes.push(refTitle);
+      }
+
+      // 3. Update SQLite index
+      await this.indexStore.renameNote(trimmedOld, trimmedNew);
+
+      // Reconcile index for updated referencing notes so outbound links and mtimes match new body
+      for (const refTitle of updatedReferencingNotes) {
+        const meta = await this.indexStore.getNoteMetadata(refTitle);
+        const savedNote = await this.noteRepo.get(refTitle);
+        if (savedNote) {
+          await this.indexStore.upsertNote({
+            title: refTitle,
+            filePath: meta?.filePath ?? `${refTitle}.md`,
+            mtime: Date.now(),
+            createdAt: meta?.createdAt,
+            updatedAt: typeof savedNote.frontmatter.updatedAt === "string" ? savedNote.frontmatter.updatedAt : undefined,
+            tags: savedNote.tags,
+            links: savedNote.links,
+          });
+        }
+      }
+
+      return {
+        oldTitle: trimmedOld,
+        newTitle: trimmedNew,
+        updatedReferencingNotes,
+      };
+    } catch (error) {
+      // Execute rollback in reverse order
+      for (let i = rollbackStack.length - 1; i >= 0; i--) {
+        const action = rollbackStack[i];
+        try {
+          if (action.type === "save") {
+            await this.noteRepo.save(action.note);
+          } else if (action.type === "delete") {
+            await this.noteRepo.delete(action.title);
+          }
+        } catch {
+          // preserve original error
+        }
+      }
+      throw error;
+    }
   }
 }

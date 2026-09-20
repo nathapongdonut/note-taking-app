@@ -248,4 +248,177 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
       referencedBy: ["CyclicB"],
     });
   });
+
+  describe("renameNote", () => {
+    it("renames file on disk, updates frontmatter title, rewrites referencing wiki-links, and updates SQLite index", async () => {
+      await service.createNote({
+        title: "OldTarget",
+        body: "Original target content.",
+        tags: ["target"],
+      });
+
+      await service.createNote({
+        title: "CallerOne",
+        body: "See [[OldTarget]] and [[OldTarget|Target Alias]].",
+        tags: ["caller"],
+      });
+
+      await service.createNote({
+        title: "CallerTwo",
+        body: "Also references [[OldTarget]].",
+      });
+
+      const result = await service.renameNote("OldTarget", "NewTarget");
+
+      expect(result.oldTitle).toBe("OldTarget");
+      expect(result.newTitle).toBe("NewTarget");
+      expect(result.updatedReferencingNotes.sort()).toEqual(["CallerOne", "CallerTwo"]);
+
+      // 1. Physical file on disk
+      expect(await noteRepo.exists("OldTarget")).toBe(false);
+      expect(await noteRepo.exists("NewTarget")).toBe(true);
+
+      const renamedDiskNote = await noteRepo.get("NewTarget");
+      expect(renamedDiskNote?.title).toBe("NewTarget");
+      expect(renamedDiskNote?.frontmatter.title).toBe("NewTarget");
+
+      // 2. Referencing files on disk
+      const diskCallerOne = await noteRepo.get("CallerOne");
+      expect(diskCallerOne?.body).toBe("See [[NewTarget]] and [[NewTarget|Target Alias]].");
+
+      const diskCallerTwo = await noteRepo.get("CallerTwo");
+      expect(diskCallerTwo?.body).toBe("Also references [[NewTarget]].");
+
+      // 3. SQLite index graph
+      expect(await service.getBacklinks("OldTarget")).toEqual([]);
+      expect(await service.getBacklinks("NewTarget")).toEqual(["CallerOne", "CallerTwo"]);
+      expect(await service.getOutboundLinks("CallerOne")).toEqual(["NewTarget"]);
+    });
+
+    it("updates self-referential links within the renamed note itself", async () => {
+      await service.createNote({
+        title: "RecursiveNote",
+        body: "Refers to [[RecursiveNote]].",
+      });
+
+      await service.renameNote("RecursiveNote", "NewRecursiveNote");
+
+      const diskNote = await noteRepo.get("NewRecursiveNote");
+      expect(diskNote?.body).toBe("Refers to [[NewRecursiveNote]].");
+      expect(await service.getBacklinks("NewRecursiveNote")).toEqual(["NewRecursiveNote"]);
+    });
+
+    it("throws error when trying to rename a non-existent note", async () => {
+      await expect(service.renameNote("GhostNote", "Any")).rejects.toThrow(
+        'Cannot rename note: "GhostNote" does not exist.'
+      );
+    });
+
+    it("throws error when target name already exists", async () => {
+      await service.createNote({ title: "Note1" });
+      await service.createNote({ title: "Note2" });
+
+      await expect(service.renameNote("Note1", "Note2")).rejects.toThrow(
+        'Cannot rename note: "Note2" already exists.'
+      );
+    });
+
+    it("atomically rolls back all disk modifications if writing to a referencing file fails", async () => {
+      await service.createNote({
+        title: "TargetToRename",
+        body: "Target body.",
+      });
+
+      await service.createNote({
+        title: "SafeCaller",
+        body: "Links to [[TargetToRename]].",
+      });
+
+      await service.createNote({
+        title: "FaultyCaller",
+        body: "Links to [[TargetToRename]].",
+      });
+
+      // Simulate a failure when saving FaultyCaller
+      const originalSave = noteRepo.save.bind(noteRepo);
+      let callCount = 0;
+      noteRepo.save = async (note) => {
+        if (note.title === "FaultyCaller") {
+          throw new Error("Simulated disk I/O failure on FaultyCaller");
+        }
+        return originalSave(note);
+      };
+
+      await expect(service.renameNote("TargetToRename", "AbortedNewTarget")).rejects.toThrow(
+        "Simulated disk I/O failure on FaultyCaller"
+      );
+
+      // Verify rollback: TargetToRename still exists and AbortedNewTarget does not
+      expect(await noteRepo.exists("TargetToRename")).toBe(true);
+      expect(await noteRepo.exists("AbortedNewTarget")).toBe(false);
+
+      // SafeCaller was processed before FaultyCaller, verify it was rolled back to link to TargetToRename
+      const rolledBackCaller = await noteRepo.get("SafeCaller");
+      expect(rolledBackCaller?.body).toBe("Links to [[TargetToRename]].");
+    });
+
+    it("end-to-end integration: renames note on physical filesystem, updates referencing files on disk, and preserves SQLite graph consistency", async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-e2e-"));
+      const dbPath = path.join(tempDir, "test-index.db");
+
+      try {
+        const fsRepo = new FsNoteRepository(tempDir);
+        const persistentStore = new SqliteIndexStore(dbPath);
+        const e2eService = new KnowledgeBaseService(fsRepo, persistentStore);
+
+        // 1. Create target note and two referencing notes
+        await e2eService.createNote({
+          title: "Architecture",
+          body: "Core architectural concepts.",
+          tags: ["architecture"],
+        });
+
+        await e2eService.createNote({
+          title: "ModuleA",
+          body: "Module A implements [[Architecture]] patterns.",
+        });
+
+        await e2eService.createNote({
+          title: "ModuleB",
+          body: "Module B relies on [[Architecture|System Architecture]] details.",
+        });
+
+        // 2. Perform rename refactor
+        const result = await e2eService.renameNote("Architecture", "SystemArchitecture");
+        expect(result.oldTitle).toBe("Architecture");
+        expect(result.newTitle).toBe("SystemArchitecture");
+        expect(result.updatedReferencingNotes.sort()).toEqual(["ModuleA", "ModuleB"]);
+
+        // 3. Verify physical files on disk
+        const oldFileExists = await fs.access(path.join(tempDir, "Architecture.md")).then(() => true, () => false);
+        const newFileExists = await fs.access(path.join(tempDir, "SystemArchitecture.md")).then(() => true, () => false);
+        expect(oldFileExists).toBe(false);
+        expect(newFileExists).toBe(true);
+
+        const newRawContent = await fs.readFile(path.join(tempDir, "SystemArchitecture.md"), "utf-8");
+        expect(newRawContent).toContain("title: SystemArchitecture");
+
+        const modARaw = await fs.readFile(path.join(tempDir, "ModuleA.md"), "utf-8");
+        expect(modARaw).toContain("[[SystemArchitecture]]");
+
+        const modBRaw = await fs.readFile(path.join(tempDir, "ModuleB.md"), "utf-8");
+        expect(modBRaw).toContain("[[SystemArchitecture|System Architecture]]");
+
+        // 4. Verify graph consistency in persistent SQLite
+        expect(await e2eService.getBacklinks("Architecture")).toEqual([]);
+        expect(await e2eService.getBacklinks("SystemArchitecture")).toEqual(["ModuleA", "ModuleB"]);
+        expect(await e2eService.getOutboundLinks("ModuleA")).toEqual(["SystemArchitecture"]);
+        expect(await e2eService.getOutboundLinks("ModuleB")).toEqual(["SystemArchitecture"]);
+
+        await persistentStore.close();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
 });

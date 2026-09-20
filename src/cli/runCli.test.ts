@@ -178,4 +178,54 @@ describe("CLI Adapter (runCli)", () => {
     expect(logs.some((l) => l.includes("Backlinks:"))).toBe(true);
     expect(logs.some((l) => l.includes("• Source1"))).toBe(true);
   });
+
+  describe("rename command", () => {
+    it("renames note and outputs summary of modified referencing files", async () => {
+      await service.createNote({
+        title: "OldName",
+        body: "Content.",
+      });
+      await service.createNote({
+        title: "Linker",
+        body: "Links to [[OldName]].",
+      });
+
+      const exitCode = await runCli(["rename", "OldName", "NewName"], service, io);
+      expect(exitCode).toBe(0);
+      expect(logs.some((l) => l.includes('Renamed note "OldName" to "NewName"'))).toBe(true);
+      expect(logs.some((l) => l.includes("Modified files:"))).toBe(true);
+      expect(logs.some((l) => l.includes("• NewName.md"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Linker.md"))).toBe(true);
+      expect(logs.some((l) => l.includes("Updated 1 referencing note(s):"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Linker"))).toBe(true);
+    });
+
+    it("outputs appropriate message when renamed note has no referencing notes", async () => {
+      await service.createNote({
+        title: "LoneNote",
+        body: "No other note links here.",
+      });
+
+      const exitCode = await runCli(["rename", "LoneNote", "RenamedLoneNote"], service, io);
+      expect(exitCode).toBe(0);
+      expect(logs.some((l) => l.includes('Renamed note "LoneNote" to "RenamedLoneNote"'))).toBe(true);
+      expect(logs.some((l) => l.includes("No referencing notes needed updates."))).toBe(true);
+    });
+
+    it("returns error when old or new title argument is missing", async () => {
+      const exitCode1 = await runCli(["rename"], service, io);
+      expect(exitCode1).toBe(1);
+      expect(errors.some((e) => e.includes("Please provide both old and new note titles"))).toBe(true);
+
+      const exitCode2 = await runCli(["rename", "OnlyOld"], service, io);
+      expect(exitCode2).toBe(1);
+      expect(errors.some((e) => e.includes("Please provide both old and new note titles"))).toBe(true);
+    });
+
+    it("handles error when trying to rename non-existent note", async () => {
+      const exitCode = await runCli(["rename", "DoesNotExist", "New"], service, io);
+      expect(exitCode).toBe(1);
+      expect(errors.some((e) => e.includes('Cannot rename note: "DoesNotExist" does not exist'))).toBe(true);
+    });
+  });
 });
