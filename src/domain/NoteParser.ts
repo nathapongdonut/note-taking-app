@@ -31,23 +31,62 @@ export class NoteParser {
         ? (frontmatter.tags.map(String).map((t) => t.trim()).filter(Boolean) as string[])
         : [];
 
+      const links = this.extractWikiLinks(body);
+
       return {
         title,
         frontmatter,
         tags,
         body,
+        links,
       };
     }
 
     const body = rawContent.trim();
     const title = this.extractFirstHeading(body) || fallbackTitle || "Untitled";
+    const links = this.extractWikiLinks(body);
 
     return {
       title,
       frontmatter: {},
       tags: [],
-      body: rawContent.trim(),
+      body,
+      links,
     };
+  }
+
+  /**
+   * Extracts all unique [[Target Title]] Wiki-links from markdown content,
+   * ignoring code blocks (fenced and inline) and escaped characters.
+   */
+  static extractWikiLinks(content: string): string[] {
+    if (!content) {
+      return [];
+    }
+
+    // 1. Remove fenced code blocks (``` or ~~~ with at least 3 markers)
+    const noFencedCode = content.replace(
+      /(?:^|\n)([`~]{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)/g,
+      "\n"
+    );
+
+    // 2. Remove inline code spans (`...` or ``...``)
+    const noInlineCode = noFencedCode.replace(/(`+)(?:(?!\1)[\s\S])*?\1/g, " ");
+
+    // 3. Replace escaped characters (\.) with spaces
+    const unescaped = noInlineCode.replace(/\\./g, " ");
+
+    // 4. Extract [[Target Title]]
+    const matches = unescaped.matchAll(/\[\[([^\[\]\r\n]+?)\]\]/g);
+    const links: string[] = [];
+    for (const match of matches) {
+      const target = match[1].split("|")[0].trim();
+      if (target.length > 0) {
+        links.push(target);
+      }
+    }
+
+    return Array.from(new Set(links));
   }
 
   private static extractFirstHeading(content: string): string | null {

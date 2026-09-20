@@ -11,4 +11,5 @@ export interface Note {
   frontmatter: NoteFrontmatter;
   tags: string[];
   body: string;
+  links?: string[];
 }

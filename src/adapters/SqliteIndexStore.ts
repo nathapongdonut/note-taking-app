@@ -28,6 +28,16 @@ export class SqliteIndexStore implements IndexStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
+
+      CREATE TABLE IF NOT EXISTS links (
+        source_title TEXT NOT NULL,
+        target_title TEXT NOT NULL,
+        PRIMARY KEY (source_title, target_title),
+        FOREIGN KEY (source_title) REFERENCES notes(title) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_title);
+      CREATE INDEX IF NOT EXISTS idx_links_source ON links(source_title);
     `);
   }
 
@@ -50,6 +60,14 @@ export class SqliteIndexStore implements IndexStore {
       INSERT OR IGNORE INTO tags (note_title, tag) VALUES (?, ?)
     `);
 
+    const deleteLinksStmt = this.db.prepare(`
+      DELETE FROM links WHERE source_title = ?
+    `);
+
+    const insertLinkStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO links (source_title, target_title) VALUES (?, ?)
+    `);
+
     upsertStmt.run(
       record.title,
       record.filePath,
@@ -64,6 +82,17 @@ export class SqliteIndexStore implements IndexStore {
       const normalizedTag = tag.trim();
       if (normalizedTag.length > 0) {
         insertTagStmt.run(record.title, normalizedTag);
+      }
+    }
+
+    deleteLinksStmt.run(record.title);
+
+    if (record.links) {
+      for (const link of record.links) {
+        const normalizedLink = link.trim();
+        if (normalizedLink.length > 0) {
+          insertLinkStmt.run(record.title, normalizedLink);
+        }
       }
     }
   }
@@ -107,6 +136,12 @@ export class SqliteIndexStore implements IndexStore {
     const tagRows = tagStmt.all(title) as Array<{ tag: string }>;
     const tags = tagRows.map((r) => r.tag);
 
+    const linkStmt = this.db.prepare(`
+      SELECT target_title FROM links WHERE source_title = ? ORDER BY target_title ASC
+    `);
+    const linkRows = linkStmt.all(title) as Array<{ target_title: string }>;
+    const links = linkRows.map((r) => r.target_title);
+
     return {
       title: noteRow.title,
       filePath: noteRow.file_path,
@@ -114,7 +149,16 @@ export class SqliteIndexStore implements IndexStore {
       createdAt: noteRow.created_at ?? undefined,
       updatedAt: noteRow.updated_at ?? undefined,
       tags,
+      links,
     };
+  }
+
+  async getOutboundLinks(title: string): Promise<string[]> {
+    const stmt = this.db.prepare(`
+      SELECT target_title FROM links WHERE source_title = ? ORDER BY target_title ASC
+    `);
+    const rows = stmt.all(title.trim()) as Array<{ target_title: string }>;
+    return rows.map((r) => r.target_title);
   }
 
   async listAllIndexedTitles(): Promise<string[]> {

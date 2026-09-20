@@ -5,6 +5,7 @@ export interface NoteRecord {
   createdAt?: string;
   updatedAt?: string;
   tags: string[];
+  links?: string[];
 }
 
 export interface NoteMetadata {
@@ -14,19 +15,20 @@ export interface NoteMetadata {
   createdAt?: string;
   updatedAt?: string;
   tags: string[];
+  links?: string[];
 }
 
 /**
- * Port interface for indexing and fast querying of Note metadata and tags.
+ * Port interface for indexing and fast querying of Note metadata, tags, and link relationships.
  */
 export interface IndexStore {
   /**
-   * Inserts or updates a Note's metadata and synchronizes its tags in the index.
+   * Inserts or updates a Note's metadata and synchronizes its tags and outbound links in the index.
    */
   upsertNote(record: NoteRecord): Promise<void>;
 
   /**
-   * Deletes a Note from the index and cascades deletion of its tags.
+   * Deletes a Note from the index and cascades deletion of its tags and outbound links.
    */
   deleteNote(title: string): Promise<boolean>;
 
@@ -36,9 +38,14 @@ export interface IndexStore {
   searchByTag(tag: string): Promise<string[]>;
 
   /**
-   * Retrieves the indexed metadata and tags for a note.
+   * Retrieves the indexed metadata, tags, and outbound links for a note.
    */
   getNoteMetadata(title: string): Promise<NoteMetadata | null>;
+
+  /**
+   * Retrieves all outbound Wiki-link targets from a note.
+   */
+  getOutboundLinks(title: string): Promise<string[]>;
 
   /**
    * Lists all note titles currently recorded in the index.

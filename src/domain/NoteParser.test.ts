@@ -76,5 +76,78 @@ Body text despite bad frontmatter.`;
     expect(note.tags).toEqual([]);
     expect(note.body).toBe("Body text despite bad frontmatter.");
   });
+
+  describe("extractWikiLinks", () => {
+    it("extracts all [[Target Title]] patterns from markdown text", () => {
+      const content = `Refer to [[Cardiology]] and [[Neurology]] for further details.`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Cardiology", "Neurology"]);
+    });
+
+    it("deduplicates multiple links pointing to the same target note", () => {
+      const content = `Review [[Cardiology]] in morning, then [[Cardiology]] in evening.`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Cardiology"]);
+    });
+
+    it("extracts target note title when alias syntax is used", () => {
+      const content = `See [[Cardiology|Heart Study]] and [[Neurology|Brain]].`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Cardiology", "Neurology"]);
+    });
+
+    it("ignores Wiki-links inside fenced code blocks (backticks and tildes)", () => {
+      const content = `
+Normal link: [[Cardiology]]
+
+\`\`\`typescript
+// Fenced code block with backticks
+const note = "[[Ignored Backtick Link]]";
+\`\`\`
+
+~~~python
+# Fenced code block with tildes
+note = "[[Ignored Tilde Link]]"
+~~~
+
+Another normal link: [[Pulmonology]]
+`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Cardiology", "Pulmonology"]);
+    });
+
+    it("ignores Wiki-links inside inline code spans", () => {
+      const content = `Check \`[[Ignored Inline Link]]\` or \`\`[[Double Backtick Link]]\`\`, but visit [[Neurology]].`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Neurology"]);
+    });
+
+    it("ignores escaped Wiki-link brackets", () => {
+      const content = `
+Escaped single bracket: \\[[Not A Link]]
+Escaped double bracket: \\[\\[Also Not A Link\\]\\]
+Escaped backslash before real link: \\\\[[Real Link]]
+`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Real Link"]);
+    });
+
+    it("ignores standard markdown links and empty brackets", () => {
+      const content = `[Regular Link](https://example.com) and [[ ]] and [[]] and [[Valid Link]].`;
+      const links = NoteParser.extractWikiLinks(content);
+      expect(links).toEqual(["Valid Link"]);
+    });
+
+    it("populates links field in Note when parsing markdown", () => {
+      const raw = `---
+title: Clinical Note
+---
+Consult [[Dr Smith]] regarding [[Blood Work]]. Duplicate [[Blood Work]].`;
+
+      const note = NoteParser.parse(raw);
+      expect(note.title).toBe("Clinical Note");
+      expect(note.links).toEqual(["Dr Smith", "Blood Work"]);
+    });
+  });
 });
 

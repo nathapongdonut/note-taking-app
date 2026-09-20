@@ -1,9 +1,16 @@
 import type { Note, NoteFrontmatter } from "../domain/Note.js";
+import { NoteParser } from "../domain/NoteParser.js";
 import type { NoteRepository } from "../ports/NoteRepository.js";
 import type { IndexStore, NoteRecord } from "../ports/IndexStore.js";
 
 export interface CreateNoteInput {
   title: string;
+  body?: string;
+  tags?: string[];
+  frontmatter?: Record<string, unknown>;
+}
+
+export interface UpdateNoteInput {
   body?: string;
   tags?: string[];
   frontmatter?: Record<string, unknown>;
@@ -32,6 +39,9 @@ export class KnowledgeBaseService {
       ? Array.from(new Set(input.tags.map(String).map((t) => t.trim()).filter(Boolean)))
       : [];
 
+    const body = input.body ? input.body.trim() : "";
+    const links = NoteParser.extractWikiLinks(body);
+
     const nowIso = new Date().toISOString();
     const frontmatter: NoteFrontmatter = {
       title,
@@ -45,7 +55,8 @@ export class KnowledgeBaseService {
       title,
       frontmatter,
       tags,
-      body: input.body ? input.body.trim() : "",
+      body,
+      links,
     };
 
     await this.noteRepo.save(note);
@@ -57,10 +68,74 @@ export class KnowledgeBaseService {
       createdAt: nowIso,
       updatedAt: nowIso,
       tags,
+      links,
     };
     await this.indexStore.upsertNote(record);
 
     return note;
+  }
+
+  /**
+   * Saves or overwrites a Note entity, persisting to the Vault and updating the SQLite index.
+   */
+  async saveNote(note: Note): Promise<void> {
+    const links = NoteParser.extractWikiLinks(note.body);
+    const noteWithLinks: Note = {
+      ...note,
+      links,
+    };
+
+    await this.noteRepo.save(noteWithLinks);
+
+    const existingMeta = await this.indexStore.getNoteMetadata(note.title);
+    const nowIso = new Date().toISOString();
+    const record: NoteRecord = {
+      title: note.title,
+      filePath: `${note.title}.md`,
+      mtime: Date.now(),
+      createdAt:
+        existingMeta?.createdAt ??
+        (typeof note.frontmatter?.createdAt === "string" ? note.frontmatter.createdAt : nowIso),
+      updatedAt: nowIso,
+      tags: note.tags,
+      links,
+    };
+    await this.indexStore.upsertNote(record);
+  }
+
+  /**
+   * Updates an existing note's body, tags, and/or frontmatter and updates the SQLite index.
+   */
+  async updateNote(title: string, input: UpdateNoteInput): Promise<Note> {
+    const trimmedTitle = title.trim();
+    const existing = await this.noteRepo.get(trimmedTitle);
+    if (!existing) {
+      throw new Error(`Note with title "${trimmedTitle}" does not exist.`);
+    }
+
+    const nowIso = new Date().toISOString();
+    const body = input.body !== undefined ? input.body.trim() : existing.body;
+    const tags =
+      input.tags !== undefined
+        ? Array.from(new Set(input.tags.map(String).map((t) => t.trim()).filter(Boolean)))
+        : existing.tags;
+    const links = NoteParser.extractWikiLinks(body);
+
+    const updatedNote: Note = {
+      title: trimmedTitle,
+      frontmatter: {
+        ...existing.frontmatter,
+        ...input.frontmatter,
+        updatedAt: nowIso,
+        tags,
+      },
+      tags,
+      body,
+      links,
+    };
+
+    await this.saveNote(updatedNote);
+    return updatedNote;
   }
 
   /**
@@ -85,6 +160,13 @@ export class KnowledgeBaseService {
     const deletedFromDisk = await this.noteRepo.delete(trimmedTitle);
     await this.indexStore.deleteNote(trimmedTitle);
     return deletedFromDisk;
+  }
+
+  /**
+   * Retrieves all outbound Wiki-link targets from a note recorded in the index.
+   */
+  async getOutboundLinks(title: string): Promise<string[]> {
+    return this.indexStore.getOutboundLinks(title.trim());
   }
 
   /**
