@@ -130,4 +130,74 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
     const titles = await indexStore.listAllIndexedTitles();
     expect(titles.sort()).toEqual(["Alpha", "Beta"]);
   });
+
+  it("stores and retrieves outbound links for an indexed note", async () => {
+    await indexStore.upsertNote({
+      title: "Cardiology",
+      filePath: "/vault/Cardiology.md",
+      mtime: 1700000000,
+      tags: ["medicine"],
+      links: ["Heart Failure", "Arrhythmia"],
+    });
+
+    const outbound = await indexStore.getOutboundLinks("Cardiology");
+    expect(outbound).toEqual(["Arrhythmia", "Heart Failure"]);
+
+    const metadata = await indexStore.getNoteMetadata("Cardiology");
+    expect(metadata?.links).toEqual(["Arrhythmia", "Heart Failure"]);
+  });
+
+  it("replaces old outbound links when a note is updated with new links", async () => {
+    // Initial links: ["Alpha", "Beta"]
+    await indexStore.upsertNote({
+      title: "SourceNote",
+      filePath: "/vault/SourceNote.md",
+      mtime: 1700000000,
+      tags: [],
+      links: ["Alpha", "Beta"],
+    });
+
+    expect(await indexStore.getOutboundLinks("SourceNote")).toEqual(["Alpha", "Beta"]);
+
+    // Update with new links: ["Beta", "Gamma"] (Alpha removed, Gamma added)
+    await indexStore.upsertNote({
+      title: "SourceNote",
+      filePath: "/vault/SourceNote.md",
+      mtime: 1700000010,
+      tags: [],
+      links: ["Beta", "Gamma"],
+    });
+
+    expect(await indexStore.getOutboundLinks("SourceNote")).toEqual(["Beta", "Gamma"]);
+  });
+
+  it("cascades deletion of outbound links when a note is deleted", async () => {
+    await indexStore.upsertNote({
+      title: "TemporarySource",
+      filePath: "/vault/TemporarySource.md",
+      mtime: 1700000000,
+      tags: [],
+      links: ["TargetA", "TargetB"],
+    });
+
+    expect(await indexStore.getOutboundLinks("TemporarySource")).toEqual(["TargetA", "TargetB"]);
+
+    const deleted = await indexStore.deleteNote("TemporarySource");
+    expect(deleted).toBe(true);
+
+    expect(await indexStore.getOutboundLinks("TemporarySource")).toEqual([]);
+  });
+
+  it("allows linking to uncreated target notes (ghost notes)", async () => {
+    await indexStore.upsertNote({
+      title: "ExistingNote",
+      filePath: "/vault/ExistingNote.md",
+      mtime: 1700000000,
+      tags: [],
+      links: ["UncreatedGhostNote"],
+    });
+
+    const outbound = await indexStore.getOutboundLinks("ExistingNote");
+    expect(outbound).toEqual(["UncreatedGhostNote"]);
+  });
 });

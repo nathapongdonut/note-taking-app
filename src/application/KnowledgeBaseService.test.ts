@@ -90,4 +90,50 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
     expect(await noteRepo.exists("Temporary")).toBe(false);
     expect(await service.searchByTag("temp")).toEqual([]);
   });
+
+  it("extracts Wiki-links and populates the SQLite link graph upon note creation", async () => {
+    const note = await service.createNote({
+      title: "IndexNote",
+      body: "Check out [[NoteA]] and [[NoteB]], along with duplicate [[NoteA]]. Also inline `[[Ignored]]`.",
+    });
+
+    expect(note.links).toEqual(["NoteA", "NoteB"]);
+
+    const outboundLinks = await service.getOutboundLinks("IndexNote");
+    expect(outboundLinks).toEqual(["NoteA", "NoteB"]);
+
+    const metadata = await indexStore.getNoteMetadata("IndexNote");
+    expect(metadata?.links).toEqual(["NoteA", "NoteB"]);
+  });
+
+  it("replaces old outbound links when a note is updated", async () => {
+    await service.createNote({
+      title: "MutableNote",
+      body: "Initially connects to [[OldTarget1]] and [[OldTarget2]].",
+    });
+
+    expect(await service.getOutboundLinks("MutableNote")).toEqual(["OldTarget1", "OldTarget2"]);
+
+    // Update note body with different links
+    await service.updateNote("MutableNote", {
+      body: "Now connects only to [[NewTarget]] and [[OldTarget2]].",
+    });
+
+    const updatedLinks = await service.getOutboundLinks("MutableNote");
+    expect(updatedLinks).toEqual(["NewTarget", "OldTarget2"]);
+  });
+
+  it("cleans up outbound links when a note is deleted", async () => {
+    await service.createNote({
+      title: "EphemeralNote",
+      body: "Links to [[Ghost1]] and [[Ghost2]].",
+    });
+
+    expect(await service.getOutboundLinks("EphemeralNote")).toEqual(["Ghost1", "Ghost2"]);
+
+    const deleted = await service.deleteNote("EphemeralNote");
+    expect(deleted).toBe(true);
+
+    expect(await service.getOutboundLinks("EphemeralNote")).toEqual([]);
+  });
 });
