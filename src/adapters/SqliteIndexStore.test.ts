@@ -200,4 +200,74 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
     const outbound = await indexStore.getOutboundLinks("ExistingNote");
     expect(outbound).toEqual(["UncreatedGhostNote"]);
   });
+
+  it("retrieves incoming backlinks for a given note title", async () => {
+    await indexStore.upsertNote({
+      title: "Cardiology",
+      filePath: "/vault/Cardiology.md",
+      mtime: 1,
+      tags: [],
+      links: ["Pharmacology"],
+    });
+    await indexStore.upsertNote({
+      title: "Neurology",
+      filePath: "/vault/Neurology.md",
+      mtime: 2,
+      tags: [],
+      links: ["Pharmacology", "Anatomy"],
+    });
+    await indexStore.upsertNote({
+      title: "Pharmacology",
+      filePath: "/vault/Pharmacology.md",
+      mtime: 3,
+      tags: [],
+      links: [],
+    });
+
+    const backlinks = await indexStore.getBacklinks("Pharmacology");
+    expect(backlinks).toEqual(["Cardiology", "Neurology"]);
+
+    const emptyBacklinks = await indexStore.getBacklinks("Cardiology");
+    expect(emptyBacklinks).toEqual([]);
+  });
+
+  it("discovers all ghost notes with their referencing sources and resolves them once authored", async () => {
+    await indexStore.upsertNote({
+      title: "NoteA",
+      filePath: "/vault/NoteA.md",
+      mtime: 1,
+      tags: [],
+      links: ["GhostAlpha", "GhostBeta"],
+    });
+    await indexStore.upsertNote({
+      title: "NoteB",
+      filePath: "/vault/NoteB.md",
+      mtime: 2,
+      tags: [],
+      links: ["GhostAlpha", "NoteA"],
+    });
+
+    // GhostAlpha is referenced by NoteA and NoteB.
+    // GhostBeta is referenced by NoteA.
+    // NoteA is referenced by NoteB, but NoteA exists in notes table so it is NOT a ghost note.
+    const ghostNotes = await indexStore.getGhostNotes();
+    expect(ghostNotes).toEqual([
+      { targetTitle: "GhostAlpha", referencedBy: ["NoteA", "NoteB"] },
+      { targetTitle: "GhostBeta", referencedBy: ["NoteA"] },
+    ]);
+
+    // Author GhostAlpha -> it should no longer be a ghost note
+    await indexStore.upsertNote({
+      title: "GhostAlpha",
+      filePath: "/vault/GhostAlpha.md",
+      mtime: 3,
+      tags: [],
+      links: [],
+    });
+
+    const updatedGhosts = await indexStore.getGhostNotes();
+    expect(updatedGhosts).toEqual([
+      { targetTitle: "GhostBeta", referencedBy: ["NoteA"] },
+    ]);
+  });
 });

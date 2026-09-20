@@ -18,6 +18,11 @@ export interface NoteMetadata {
   links?: string[];
 }
 
+export interface GhostNoteRecord {
+  targetTitle: string;
+  referencedBy: string[];
+}
+
 /**
  * Port interface for indexing and fast querying of Note metadata, tags, and link relationships.
  */
@@ -46,6 +51,16 @@ export interface IndexStore {
    * Retrieves all outbound Wiki-link targets from a note.
    */
   getOutboundLinks(title: string): Promise<string[]>;
+
+  /**
+   * Retrieves all incoming Backlinks (notes that contain a Wiki-link to this title).
+   */
+  getBacklinks(title: string): Promise<string[]>;
+
+  /**
+   * Retrieves all Ghost Notes (concepts referenced via Wiki-links that do not exist as authored notes in the Vault).
+   */
+  getGhostNotes(): Promise<GhostNoteRecord[]>;
 
   /**
    * Lists all note titles currently recorded in the index.

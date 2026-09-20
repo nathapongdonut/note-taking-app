@@ -103,4 +103,79 @@ describe("CLI Adapter (runCli)", () => {
     expect(exitCode).toBe(1);
     expect(errors.some((e) => e.includes("Unknown command"))).toBe(true);
   });
+
+  it("handles 'backlinks' command and lists incoming backlinks", async () => {
+    await service.createNote({
+      title: "NoteA",
+      body: "Mentions [[SharedTopic]].",
+    });
+    await service.createNote({
+      title: "NoteB",
+      body: "Also mentions [[SharedTopic]].",
+    });
+    await service.createNote({
+      title: "SharedTopic",
+      body: "Target note content.",
+    });
+
+    const exitCode = await runCli(["backlinks", "SharedTopic"], service, io);
+    expect(exitCode).toBe(0);
+    expect(logs.some((l) => l.includes('Backlinks for "SharedTopic":'))).toBe(true);
+    expect(logs.some((l) => l.includes("• NoteA"))).toBe(true);
+    expect(logs.some((l) => l.includes("• NoteB"))).toBe(true);
+
+    const emptyExit = await runCli(["backlinks", "NoteA"], service, io);
+    expect(emptyExit).toBe(0);
+    expect(logs.some((l) => l.includes('No backlinks found for "NoteA"'))).toBe(true);
+  });
+
+  it("returns error when 'backlinks' command is run without a title", async () => {
+    const exitCode = await runCli(["backlinks"], service, io);
+    expect(exitCode).toBe(1);
+    expect(errors.some((e) => e.includes("Please specify the note title"))).toBe(true);
+  });
+
+  it("handles 'ghost-notes' command and lists ghost notes with referrers", async () => {
+    await service.createNote({
+      title: "Article1",
+      body: "See [[QuantumComputing]] and [[QuantumEntanglement]].",
+    });
+    await service.createNote({
+      title: "Article2",
+      body: "See [[QuantumComputing]].",
+    });
+
+    const exitCode = await runCli(["ghost-notes"], service, io);
+    expect(exitCode).toBe(0);
+    expect(logs.some((l) => l.includes("Ghost notes:"))).toBe(true);
+    expect(logs.some((l) => l.includes("QuantumComputing") && l.includes("Article1, Article2"))).toBe(true);
+    expect(logs.some((l) => l.includes("QuantumEntanglement") && l.includes("Article1"))).toBe(true);
+  });
+
+  it("outputs appropriate message when 'ghost-notes' finds no ghost notes", async () => {
+    await service.createNote({
+      title: "SelfContained",
+      body: "No links here.",
+    });
+
+    const exitCode = await runCli(["ghost-notes"], service, io);
+    expect(exitCode).toBe(0);
+    expect(logs.some((l) => l.includes("No ghost notes found"))).toBe(true);
+  });
+
+  it("includes Backlinks section in 'view' command output", async () => {
+    await service.createNote({
+      title: "Source1",
+      body: "Links to [[Target]].",
+    });
+    await service.createNote({
+      title: "Target",
+      body: "Target body text.",
+    });
+
+    const exitCode = await runCli(["view", "Target"], service, io);
+    expect(exitCode).toBe(0);
+    expect(logs.some((l) => l.includes("Backlinks:"))).toBe(true);
+    expect(logs.some((l) => l.includes("• Source1"))).toBe(true);
+  });
 });
