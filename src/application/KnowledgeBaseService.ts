@@ -237,8 +237,8 @@ export class KnowledgeBaseService {
 
     // Track written files for atomic rollback
     type RollbackAction =
-      | { type: "rename"; oldTitle: string; newTitle: string; originalNote: Note }
-      | { type: "modify"; title: string; originalNote: Note };
+      | { type: "save"; note: Note }
+      | { type: "delete"; title: string };
 
     const rollbackStack: RollbackAction[] = [];
     const updatedReferencingNotes: string[] = [];
@@ -255,15 +255,17 @@ export class KnowledgeBaseService {
         frontmatter: {
           ...oldNote.frontmatter,
           title: trimmedNew,
-          updatedAt: nowIso,
+          ...(oldNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
         },
         body: updatedBody,
         links,
       };
 
       await this.noteRepo.save(renamedNote);
+      rollbackStack.push({ type: "delete", title: trimmedNew });
+
       await this.noteRepo.delete(trimmedOld);
-      rollbackStack.push({ type: "rename", oldTitle: trimmedOld, newTitle: trimmedNew, originalNote: oldNote });
+      rollbackStack.push({ type: "save", note: oldNote });
 
       // 2. Refactor incoming Wiki-links across all referencing notes
       for (const [refTitle, refNote] of referencingNotesMap.entries()) {
@@ -276,29 +278,29 @@ export class KnowledgeBaseService {
           links: refLinks,
           frontmatter: {
             ...refNote.frontmatter,
-            updatedAt: nowIso,
+            ...(refNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
           },
         };
 
         await this.noteRepo.save(updatedRefNote);
-        rollbackStack.push({ type: "modify", title: refTitle, originalNote: refNote });
+        rollbackStack.push({ type: "save", note: refNote });
         updatedReferencingNotes.push(refTitle);
       }
 
       // 3. Update SQLite index
       await this.indexStore.renameNote(trimmedOld, trimmedNew);
 
-      // Re-index updated referencing notes so their outbound links and mtimes match the new body
+      // Reconcile index for updated referencing notes so outbound links and mtimes match new body
       for (const refTitle of updatedReferencingNotes) {
         const meta = await this.indexStore.getNoteMetadata(refTitle);
         const savedNote = await this.noteRepo.get(refTitle);
         if (savedNote) {
           await this.indexStore.upsertNote({
             title: refTitle,
-            filePath: `${refTitle}.md`,
+            filePath: meta?.filePath ?? `${refTitle}.md`,
             mtime: Date.now(),
             createdAt: meta?.createdAt,
-            updatedAt: nowIso,
+            updatedAt: typeof savedNote.frontmatter.updatedAt === "string" ? savedNote.frontmatter.updatedAt : undefined,
             tags: savedNote.tags,
             links: savedNote.links,
           });
@@ -315,13 +317,12 @@ export class KnowledgeBaseService {
       for (let i = rollbackStack.length - 1; i >= 0; i--) {
         const action = rollbackStack[i];
         try {
-          if (action.type === "rename") {
-            await this.noteRepo.save(action.originalNote);
-            await this.noteRepo.delete(action.newTitle);
-          } else if (action.type === "modify") {
-            await this.noteRepo.save(action.originalNote);
+          if (action.type === "save") {
+            await this.noteRepo.save(action.note);
+          } else if (action.type === "delete") {
+            await this.noteRepo.delete(action.title);
           }
-        } catch (rollbackErr) {
+        } catch {
           // preserve original error
         }
       }

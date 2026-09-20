@@ -193,6 +193,9 @@ describe("CLI Adapter (runCli)", () => {
       const exitCode = await runCli(["rename", "OldName", "NewName"], service, io);
       expect(exitCode).toBe(0);
       expect(logs.some((l) => l.includes('Renamed note "OldName" to "NewName"'))).toBe(true);
+      expect(logs.some((l) => l.includes("Modified files:"))).toBe(true);
+      expect(logs.some((l) => l.includes("• NewName.md"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Linker.md"))).toBe(true);
       expect(logs.some((l) => l.includes("Updated 1 referencing note(s):"))).toBe(true);
       expect(logs.some((l) => l.includes("• Linker"))).toBe(true);
     });

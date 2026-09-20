@@ -212,9 +212,9 @@ export class SqliteIndexStore implements IndexStore {
       return;
     }
 
-    const checkOldStmt = this.db.prepare("SELECT title FROM notes WHERE title = ?");
-    const oldExists = checkOldStmt.get(trimmedOld);
-    if (!oldExists) {
+    const checkOldStmt = this.db.prepare("SELECT title, file_path FROM notes WHERE title = ?");
+    const oldRecord = checkOldStmt.get(trimmedOld) as { title: string; file_path: string } | undefined;
+    if (!oldRecord) {
       throw new Error(`Cannot rename note: "${trimmedOld}" does not exist in the index.`);
     }
 
@@ -234,10 +234,17 @@ export class SqliteIndexStore implements IndexStore {
 
       // 2. Update notes table, which cascades source_title in links and note_title in tags
       const nowIso = new Date().toISOString();
-      const newFilePath = `${trimmedNew}.md`;
+      const nowMtime = Date.now();
+      const oldPath = oldRecord.file_path;
+      const lastSlash = Math.max(oldPath.lastIndexOf("/"), oldPath.lastIndexOf("\\"));
+      const newFilePath =
+        lastSlash >= 0
+          ? `${oldPath.slice(0, lastSlash + 1)}${trimmedNew}.md`
+          : `${trimmedNew}.md`;
+
       this.db
-        .prepare("UPDATE notes SET title = ?, file_path = ?, updated_at = ? WHERE title = ?")
-        .run(trimmedNew, newFilePath, nowIso, trimmedOld);
+        .prepare("UPDATE notes SET title = ?, file_path = ?, mtime = ?, updated_at = ? WHERE title = ?")
+        .run(trimmedNew, newFilePath, nowMtime, nowIso, trimmedOld);
 
       this.db.exec("COMMIT;");
     } catch (err) {

@@ -361,5 +361,64 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
       const rolledBackCaller = await noteRepo.get("SafeCaller");
       expect(rolledBackCaller?.body).toBe("Links to [[TargetToRename]].");
     });
+
+    it("end-to-end integration: renames note on physical filesystem, updates referencing files on disk, and preserves SQLite graph consistency", async () => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-e2e-"));
+      const dbPath = path.join(tempDir, "test-index.db");
+
+      try {
+        const fsRepo = new FsNoteRepository(tempDir);
+        const persistentStore = new SqliteIndexStore(dbPath);
+        const e2eService = new KnowledgeBaseService(fsRepo, persistentStore);
+
+        // 1. Create target note and two referencing notes
+        await e2eService.createNote({
+          title: "Architecture",
+          body: "Core architectural concepts.",
+          tags: ["architecture"],
+        });
+
+        await e2eService.createNote({
+          title: "ModuleA",
+          body: "Module A implements [[Architecture]] patterns.",
+        });
+
+        await e2eService.createNote({
+          title: "ModuleB",
+          body: "Module B relies on [[Architecture|System Architecture]] details.",
+        });
+
+        // 2. Perform rename refactor
+        const result = await e2eService.renameNote("Architecture", "SystemArchitecture");
+        expect(result.oldTitle).toBe("Architecture");
+        expect(result.newTitle).toBe("SystemArchitecture");
+        expect(result.updatedReferencingNotes.sort()).toEqual(["ModuleA", "ModuleB"]);
+
+        // 3. Verify physical files on disk
+        const oldFileExists = await fs.access(path.join(tempDir, "Architecture.md")).then(() => true, () => false);
+        const newFileExists = await fs.access(path.join(tempDir, "SystemArchitecture.md")).then(() => true, () => false);
+        expect(oldFileExists).toBe(false);
+        expect(newFileExists).toBe(true);
+
+        const newRawContent = await fs.readFile(path.join(tempDir, "SystemArchitecture.md"), "utf-8");
+        expect(newRawContent).toContain("title: SystemArchitecture");
+
+        const modARaw = await fs.readFile(path.join(tempDir, "ModuleA.md"), "utf-8");
+        expect(modARaw).toContain("[[SystemArchitecture]]");
+
+        const modBRaw = await fs.readFile(path.join(tempDir, "ModuleB.md"), "utf-8");
+        expect(modBRaw).toContain("[[SystemArchitecture|System Architecture]]");
+
+        // 4. Verify graph consistency in persistent SQLite
+        expect(await e2eService.getBacklinks("Architecture")).toEqual([]);
+        expect(await e2eService.getBacklinks("SystemArchitecture")).toEqual(["ModuleA", "ModuleB"]);
+        expect(await e2eService.getOutboundLinks("ModuleA")).toEqual(["SystemArchitecture"]);
+        expect(await e2eService.getOutboundLinks("ModuleB")).toEqual(["SystemArchitecture"]);
+
+        await persistentStore.close();
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });

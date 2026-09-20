@@ -160,6 +160,11 @@ Commands:
 
         const result = await service.renameNote(oldTitle, newTitle);
         io.log(`Renamed note "${result.oldTitle}" to "${result.newTitle}".`);
+        io.log("Modified files:");
+        io.log(`  • ${result.newTitle}.md`);
+        for (const title of result.updatedReferencingNotes) {
+          io.log(`  • ${title}.md`);
+        }
         if (result.updatedReferencingNotes.length === 0) {
           io.log("No referencing notes needed updates.");
         } else {

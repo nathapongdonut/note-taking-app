@@ -288,7 +288,7 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       const newMeta = await indexStore.getNoteMetadata("NewTopic");
       expect(newMeta).not.toBeNull();
       expect(newMeta?.title).toBe("NewTopic");
-      expect(newMeta?.filePath).toBe("NewTopic.md");
+      expect(newMeta?.filePath).toBe("/vault/NewTopic.md");
       expect(newMeta?.tags).toEqual(["study"]);
       expect(newMeta?.links).toEqual(["Reference"]);
     });
