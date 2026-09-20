@@ -41,11 +41,4 @@ export class RefactorService {
       return match;
     });
   }
-
-  /**
-   * Alias for backward compatibility.
-   */
-  static renameWikiLinks(content: string, oldTitle: string, newTitle: string): string {
-    return this.refactorWikiLinks(content, oldTitle, newTitle);
-  }
 }

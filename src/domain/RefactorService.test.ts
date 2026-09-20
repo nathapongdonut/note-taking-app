@@ -79,4 +79,9 @@ Another outside: [[Old Note]]
     const result = RefactorService.refactorWikiLinks(markdown, "Old Note", "New Note");
     expect(result).toBe(markdown);
   });
+
+  it("adheres to CONTEXT.md language rules: provides refactorWikiLinks and omits renameWikiLinks", () => {
+    expect(typeof RefactorService.refactorWikiLinks).toBe("function");
+    expect((RefactorService as Record<string, unknown>).renameWikiLinks).toBeUndefined();
+  });
 });
