@@ -363,27 +363,10 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       expect(records).toEqual([]);
     });
 
-    it("retrieves fast notes summary by default without querying details", async () => {
-      await indexStore.upsertNote({
-        title: "FastNote",
-        filePath: "FastNote.md",
-        mtime: 123,
-        tags: ["tag1"],
-        links: ["Link1"],
-      });
-
-      const records = await indexStore.getAllNotesMetadata();
-      expect(records.length).toBe(1);
-      expect(records[0].title).toBe("FastNote");
-      expect(records[0].mtime).toBe(123);
-      expect(records[0].tags).toEqual([]);
-      expect(records[0].links).toEqual([]);
-    });
-
-    it("retrieves all notes with their metadata, tags, and links when includeDetails is true", async () => {
+    it("retrieves complete metadata for all notes including tags and outbound links", async () => {
       await indexStore.upsertNote({
         title: "Beta",
-        filePath: "Beta.md",
+        filePath: "vault/sub/Beta.md",
         mtime: 200,
         createdAt: "2026-01-01T00:00:00Z",
         tags: ["tagB"],
@@ -392,13 +375,13 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
 
       await indexStore.upsertNote({
         title: "Alpha",
-        filePath: "Alpha.md",
+        filePath: "vault/sub/Alpha.md",
         mtime: 100,
         tags: ["tagA1", "tagA2"],
         links: ["Beta", "Ghost"],
       });
 
-      const records = await indexStore.getAllNotesMetadata(true);
+      const records = await indexStore.getAllNotesMetadata();
       expect(records.length).toBe(2);
       expect(records[0].title).toBe("Alpha");
       expect(records[0].mtime).toBe(100);

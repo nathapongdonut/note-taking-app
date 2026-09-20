@@ -8,15 +8,7 @@ export interface NoteRecord {
   links?: string[];
 }
 
-export interface NoteMetadata {
-  title: string;
-  filePath: string;
-  mtime: number;
-  createdAt?: string;
-  updatedAt?: string;
-  tags: string[];
-  links?: string[];
-}
+export type NoteMetadata = NoteRecord;
 
 export interface GhostNoteRecord {
   targetTitle: string;
@@ -73,9 +65,9 @@ export interface IndexStore {
   renameNote(oldTitle: string, newTitle: string): Promise<void>;
 
   /**
-   * Retrieves metadata for all indexed notes, optionally including tags and outbound links.
+   * Retrieves metadata for all indexed notes.
    */
-  getAllNotesMetadata(includeDetails?: boolean): Promise<NoteMetadata[]>;
+  getAllNotesMetadata(): Promise<NoteMetadata[]>;
 
   /**
    * Closes the index connection.

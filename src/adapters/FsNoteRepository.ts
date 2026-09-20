@@ -67,27 +67,6 @@ export class FsNoteRepository implements NoteRepository {
     }
   }
 
-  async rename(oldTitle: string, newTitle: string): Promise<void> {
-    const oldPath = this.getFilePath(oldTitle);
-    const newPath = this.getFilePath(newTitle);
-
-    const note = await this.get(oldTitle);
-    if (!note) {
-      throw new Error(`Cannot rename note: "${oldTitle}" does not exist.`);
-    }
-
-    // Update note's internal title
-    note.title = newTitle;
-    if (note.frontmatter && typeof note.frontmatter.title === "string") {
-      note.frontmatter.title = newTitle;
-    }
-
-    await this.save(note);
-    if (oldPath !== newPath) {
-      await fs.unlink(oldPath);
-    }
-  }
-
   async listAllFiles(): Promise<NoteFileInfo[]> {
     await this.ensureVaultExists();
     const entries = await fs.readdir(this.vaultDirectory);

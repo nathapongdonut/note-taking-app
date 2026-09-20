@@ -37,11 +37,6 @@ export interface NoteRepository {
   exists(title: string): Promise<boolean>;
 
   /**
-   * Renames a Note from an old title to a new title in storage.
-   */
-  rename(oldTitle: string, newTitle: string): Promise<void>;
-
-  /**
    * Lists physical file information including mtime for all notes in the Vault.
    */
   listAllFiles(): Promise<NoteFileInfo[]>;
