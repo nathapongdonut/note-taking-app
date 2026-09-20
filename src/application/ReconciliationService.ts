@@ -34,45 +34,15 @@ export class ReconciliationService {
 
       if (!indexed) {
         // New file on disk
-        const note = await this.noteRepo.get(diskFile.title);
-        if (note) {
-          await this.indexStore.upsertNote({
-            title: note.title,
-            filePath: diskFile.filePath,
-            mtime: diskFile.mtime,
-            createdAt:
-              typeof note.frontmatter.createdAt === "string"
-                ? note.frontmatter.createdAt
-                : undefined,
-            updatedAt:
-              typeof note.frontmatter.updatedAt === "string"
-                ? note.frontmatter.updatedAt
-                : undefined,
-            tags: note.tags,
-            links: note.links,
-          });
-          added.push(note.title);
+        const indexedOk = await this.indexNoteFromDisk(diskFile);
+        if (indexedOk) {
+          added.push(diskFile.title);
         }
       } else if (diskFile.mtime > indexed.mtime) {
         // Modified file on disk
-        const note = await this.noteRepo.get(diskFile.title);
-        if (note) {
-          await this.indexStore.upsertNote({
-            title: note.title,
-            filePath: diskFile.filePath,
-            mtime: diskFile.mtime,
-            createdAt:
-              typeof note.frontmatter.createdAt === "string"
-                ? note.frontmatter.createdAt
-                : indexed.createdAt,
-            updatedAt:
-              typeof note.frontmatter.updatedAt === "string"
-                ? note.frontmatter.updatedAt
-                : undefined,
-            tags: note.tags,
-            links: note.links,
-          });
-          modified.push(note.title);
+        const indexedOk = await this.indexNoteFromDisk(diskFile, indexed.createdAt);
+        if (indexedOk) {
+          modified.push(diskFile.title);
         }
       }
     }
@@ -90,5 +60,36 @@ export class ReconciliationService {
       modified,
       deleted,
     };
+  }
+
+  private async indexNoteFromDisk(
+    diskFile: { title: string; filePath: string; mtime: number },
+    fallbackCreatedAt?: string
+  ): Promise<boolean> {
+    const note = await this.noteRepo.get(diskFile.title);
+    if (!note) {
+      return false;
+    }
+
+    const mtimeIso = new Date(diskFile.mtime).toISOString();
+    const createdAt =
+      typeof note.frontmatter.createdAt === "string"
+        ? note.frontmatter.createdAt
+        : fallbackCreatedAt ?? mtimeIso;
+    const updatedAt =
+      typeof note.frontmatter.updatedAt === "string"
+        ? note.frontmatter.updatedAt
+        : mtimeIso;
+
+    await this.indexStore.upsertNote({
+      title: diskFile.title,
+      filePath: diskFile.filePath,
+      mtime: diskFile.mtime,
+      createdAt,
+      updatedAt,
+      tags: note.tags,
+      links: note.links,
+    });
+    return true;
   }
 }

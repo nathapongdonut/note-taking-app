@@ -45,10 +45,6 @@ class InMemoryNoteRepository implements NoteRepository {
     }
   }
 
-  async getFileInfo(title: string): Promise<NoteFileInfo | null> {
-    return this.fileInfos.get(title) || null;
-  }
-
   async listAllFiles(): Promise<NoteFileInfo[]> {
     return Array.from(this.fileInfos.values());
   }

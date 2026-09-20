@@ -253,7 +253,7 @@ export class SqliteIndexStore implements IndexStore {
     }
   }
 
-  async getAllNotesMetadata(): Promise<NoteMetadata[]> {
+  async getAllNotesMetadata(includeDetails: boolean = false): Promise<NoteMetadata[]> {
     const noteStmt = this.db.prepare(`
       SELECT title, file_path, mtime, created_at, updated_at
       FROM notes ORDER BY title ASC
@@ -268,6 +268,18 @@ export class SqliteIndexStore implements IndexStore {
 
     if (noteRows.length === 0) {
       return [];
+    }
+
+    if (!includeDetails) {
+      return noteRows.map((row) => ({
+        title: row.title,
+        filePath: row.file_path,
+        mtime: row.mtime,
+        createdAt: row.created_at ?? undefined,
+        updatedAt: row.updated_at ?? undefined,
+        tags: [],
+        links: [],
+      }));
     }
 
     const tagStmt = this.db.prepare(`

@@ -42,11 +42,6 @@ export interface NoteRepository {
   rename(oldTitle: string, newTitle: string): Promise<void>;
 
   /**
-   * Retrieves physical file information including mtime for a note.
-   */
-  getFileInfo(title: string): Promise<NoteFileInfo | null>;
-
-  /**
    * Lists physical file information including mtime for all notes in the Vault.
    */
   listAllFiles(): Promise<NoteFileInfo[]>;

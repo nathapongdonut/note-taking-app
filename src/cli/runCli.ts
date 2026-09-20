@@ -29,7 +29,7 @@ Commands:
 
   try {
     // Run fast reconciliation on startup before executing queries
-    const queryCommands = new Set(["view", "search", "backlinks", "ghost-notes", "rename"]);
+    const queryCommands = new Set(["view", "search", "backlinks", "ghost-notes"]);
     if (queryCommands.has(command)) {
       await service.reconcile();
     }

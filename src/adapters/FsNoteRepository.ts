@@ -88,23 +88,6 @@ export class FsNoteRepository implements NoteRepository {
     }
   }
 
-  async getFileInfo(title: string): Promise<NoteFileInfo | null> {
-    const filePath = this.getFilePath(title);
-    try {
-      const stats = await fs.stat(filePath);
-      return {
-        title: title.trim(),
-        filePath: `${title.trim()}.md`,
-        mtime: Math.floor(stats.mtimeMs),
-      };
-    } catch (error: unknown) {
-      if (this.isNotFoundError(error)) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
   async listAllFiles(): Promise<NoteFileInfo[]> {
     await this.ensureVaultExists();
     const entries = await fs.readdir(this.vaultDirectory);

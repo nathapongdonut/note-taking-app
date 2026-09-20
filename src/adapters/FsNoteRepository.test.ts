@@ -124,25 +124,6 @@ describe("FsNoteRepository (Filesystem Vault Adapter)", () => {
     );
   });
 
-  it("retrieves file info including mtime with getFileInfo", async () => {
-    await repository.save({
-      title: "Physiology",
-      frontmatter: { title: "Physiology" },
-      tags: [],
-      body: "Content.",
-    });
-
-    const info = await repository.getFileInfo("Physiology");
-    expect(info).not.toBeNull();
-    expect(info?.title).toBe("Physiology");
-    expect(info?.filePath).toBe("Physiology.md");
-    expect(typeof info?.mtime).toBe("number");
-    expect(info!.mtime).toBeGreaterThan(0);
-
-    const nonExistent = await repository.getFileInfo("Does Not Exist");
-    expect(nonExistent).toBeNull();
-  });
-
   it("lists all files with titles, file paths, and mtimes with listAllFiles", async () => {
     await repository.save({
       title: "NoteA",
