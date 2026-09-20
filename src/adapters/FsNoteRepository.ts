@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Note } from "../domain/Note.js";
 import { NoteParser } from "../domain/NoteParser.js";
-import type { NoteRepository } from "../ports/NoteRepository.js";
+import type { NoteFileInfo, NoteRepository } from "../ports/NoteRepository.js";
 
 export class FsNoteRepository implements NoteRepository {
   constructor(private readonly vaultDirectory: string) {}
@@ -86,6 +86,29 @@ export class FsNoteRepository implements NoteRepository {
     if (oldPath !== newPath) {
       await fs.unlink(oldPath);
     }
+  }
+
+  async listAllFiles(): Promise<NoteFileInfo[]> {
+    await this.ensureVaultExists();
+    const entries = await fs.readdir(this.vaultDirectory);
+    const mdFiles = entries.filter((file) => file.endsWith(".md"));
+
+    const files: NoteFileInfo[] = [];
+    for (const file of mdFiles) {
+      const title = file.slice(0, -3);
+      const fullPath = path.join(this.vaultDirectory, file);
+      try {
+        const stats = await fs.stat(fullPath);
+        files.push({
+          title,
+          filePath: file,
+          mtime: Math.floor(stats.mtimeMs),
+        });
+      } catch {
+        // file removed concurrently
+      }
+    }
+    return files;
   }
 
   private isNotFoundError(error: unknown): boolean {

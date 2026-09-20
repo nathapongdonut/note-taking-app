@@ -421,4 +421,78 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
       }
     });
   });
+
+  describe("reconcile", () => {
+    it("synchronizes files added, modified, and deleted directly on the filesystem", async () => {
+      // 1. Initially create a note through the service
+      await service.createNote({
+        title: "BaseNote",
+        body: "Points to [[TargetNote]].",
+        tags: ["base"],
+      });
+
+      await service.createNote({
+        title: "TargetNote",
+        body: "Target content.",
+      });
+
+      // 2. Add an external file directly on disk (e.g. created in VS Code)
+      const externalFilePath = path.join(tempVaultDir, "ExternalNote.md");
+      await fs.writeFile(
+        externalFilePath,
+        "---\ntags: [external, sync]\n---\nCreated outside CLI, points to [[TargetNote]] and [[NewGhost]].",
+        "utf-8"
+      );
+
+      // 3. Reconcile additions
+      const addResult = await service.reconcile();
+      expect(addResult.added).toEqual(["ExternalNote"]);
+      expect(addResult.modified).toEqual([]);
+      expect(addResult.deleted).toEqual([]);
+
+      expect(await service.getBacklinks("TargetNote")).toEqual(["BaseNote", "ExternalNote"]);
+      expect(await service.searchByTag("external")).toEqual(["ExternalNote"]);
+
+      const ghosts = await service.getGhostNotes();
+      expect(ghosts.find((g) => g.targetTitle === "NewGhost")).toEqual({
+        targetTitle: "NewGhost",
+        referencedBy: ["ExternalNote"],
+      });
+
+      // 4. Modify external file directly on disk with later mtime
+      // Wait slightly or update mtime explicitly
+      const laterTime = new Date(Date.now() + 2000);
+      await fs.writeFile(
+        externalFilePath,
+        "---\ntags: [updated]\n---\nEdited outside CLI, now only points to [[OnlyTarget]].",
+        "utf-8"
+      );
+      await fs.utimes(externalFilePath, laterTime, laterTime);
+
+      const modResult = await service.reconcile();
+      expect(modResult.modified).toEqual(["ExternalNote"]);
+      expect(modResult.added).toEqual([]);
+      expect(modResult.deleted).toEqual([]);
+
+      expect(await service.searchByTag("external")).toEqual([]);
+      expect(await service.searchByTag("updated")).toEqual(["ExternalNote"]);
+      expect(await service.getOutboundLinks("ExternalNote")).toEqual(["OnlyTarget"]);
+
+      // 5. Delete TargetNote directly on filesystem (e.g. deleted in Finder)
+      const targetFilePath = path.join(tempVaultDir, "TargetNote.md");
+      await fs.unlink(targetFilePath);
+
+      const delResult = await service.reconcile();
+      expect(delResult.deleted).toEqual(["TargetNote"]);
+      expect(delResult.added).toEqual([]);
+      expect(delResult.modified).toEqual([]);
+
+      // BaseNote still points to TargetNote, so TargetNote should cleanly revert to a Ghost Note!
+      const updatedGhosts = await service.getGhostNotes();
+      expect(updatedGhosts.find((g) => g.targetTitle === "TargetNote")).toEqual({
+        targetTitle: "TargetNote",
+        referencedBy: ["BaseNote"],
+      });
+    });
+  });
 });

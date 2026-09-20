@@ -73,6 +73,11 @@ export interface IndexStore {
   renameNote(oldTitle: string, newTitle: string): Promise<void>;
 
   /**
+   * Retrieves metadata for all indexed notes, optionally including tags and outbound links.
+   */
+  getAllNotesMetadata(includeDetails?: boolean): Promise<NoteMetadata[]>;
+
+  /**
    * Closes the index connection.
    */
   close(): Promise<void>;

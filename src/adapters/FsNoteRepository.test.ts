@@ -123,5 +123,29 @@ describe("FsNoteRepository (Filesystem Vault Adapter)", () => {
       'Cannot rename note: "Ghost Note" does not exist.'
     );
   });
+
+  it("lists all files with titles, file paths, and mtimes with listAllFiles", async () => {
+    await repository.save({
+      title: "NoteA",
+      frontmatter: { title: "NoteA" },
+      tags: [],
+      body: "Body A",
+    });
+
+    await repository.save({
+      title: "NoteB",
+      frontmatter: { title: "NoteB" },
+      tags: [],
+      body: "Body B",
+    });
+
+    const allFiles = await repository.listAllFiles();
+    expect(allFiles.length).toBe(2);
+
+    const titles = allFiles.map((f) => f.title).sort();
+    expect(titles).toEqual(["NoteA", "NoteB"]);
+    expect(allFiles[0].mtime).toBeGreaterThan(0);
+    expect(allFiles[0].filePath.endsWith(".md")).toBe(true);
+  });
 });
 

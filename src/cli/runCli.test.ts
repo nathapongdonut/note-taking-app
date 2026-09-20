@@ -228,4 +228,39 @@ describe("CLI Adapter (runCli)", () => {
       expect(errors.some((e) => e.includes('Cannot rename note: "DoesNotExist" does not exist'))).toBe(true);
     });
   });
+
+  describe("sync command and auto-reconciliation", () => {
+    it("reports no changes when vault is up to date", async () => {
+      const exitCode = await runCli(["sync"], service, io);
+      expect(exitCode).toBe(0);
+      expect(logs.some((l) => l.includes("Vault is up to date. No changes detected."))).toBe(true);
+    });
+
+    it("reports additions, updates, and removals when syncing", async () => {
+      // Mock reconcile on service to return simulated results
+      service.reconcile = async () => ({
+        added: ["NewFile"],
+        modified: ["EditedFile"],
+        deleted: ["RemovedFile"],
+      });
+
+      const exitCode = await runCli(["sync"], service, io);
+      expect(exitCode).toBe(0);
+      expect(logs.some((l) => l.includes("Reconciliation complete:"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Added: 1 note(s) (NewFile)"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Updated: 1 note(s) (EditedFile)"))).toBe(true);
+      expect(logs.some((l) => l.includes("• Removed: 1 note(s) (RemovedFile)"))).toBe(true);
+    });
+
+    it("runs fast reconciliation check on startup before executing queries", async () => {
+      let reconcileCalled = false;
+      service.reconcile = async () => {
+        reconcileCalled = true;
+        return { added: [], modified: [], deleted: [] };
+      };
+
+      await runCli(["ghost-notes"], service, io);
+      expect(reconcileCalled).toBe(true);
+    });
+  });
 });
