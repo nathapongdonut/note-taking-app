@@ -1,10 +1,12 @@
+import { NoteParser } from "./NoteParser.js";
+
 export class RefactorService {
   /**
-   * Safely renames all [[oldTitle]] Wiki-links to [[newTitle]] in markdown content.
+   * Safely refactors all [[oldTitle]] Wiki-links to [[newTitle]] in markdown content.
    * Preserves aliases ([[oldTitle|Alias]]), code blocks (fenced and inline),
    * escaped characters, and surrounding text untouched.
    */
-  static renameWikiLinks(content: string, oldTitle: string, newTitle: string): string {
+  static refactorWikiLinks(content: string, oldTitle: string, newTitle: string): string {
     if (!content) {
       return "";
     }
@@ -16,15 +18,7 @@ export class RefactorService {
       return content;
     }
 
-    // Matches:
-    // 1. Fenced code blocks (``` or ~~~ with at least 3 markers)
-    // 2. Inline code spans (`...` or ``...``)
-    // 3. Escaped characters (\.)
-    // 4. Wiki-links [[...]]
-    const pattern =
-      /(?:^|\n)([`~]{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)|(`+)[\s\S]*?\2|\\.|\[\[([^\[\]\r\n]+?)\]\]/g;
-
-    return content.replace(pattern, (match, fence, inlineCode, linkContent) => {
+    return content.replace(NoteParser.WIKILINK_TOKEN_REGEX, (match, fence, inlineCode, linkContent) => {
       // Return code blocks and escaped characters untouched
       if (fence || inlineCode || match.startsWith("\\")) {
         return match;
@@ -46,5 +40,12 @@ export class RefactorService {
 
       return match;
     });
+  }
+
+  /**
+   * Alias for backward compatibility.
+   */
+  static renameWikiLinks(content: string, oldTitle: string, newTitle: string): string {
+    return this.refactorWikiLinks(content, oldTitle, newTitle);
   }
 }

@@ -200,7 +200,7 @@ export class SqliteIndexStore implements IndexStore {
     return rows.map((r) => r.title);
   }
 
-  async renameNote(oldTitle: string, newTitle: string): Promise<void> {
+  async renameNote(oldTitle: string, newTitle: string, newFilePath?: string): Promise<void> {
     const trimmedOld = oldTitle.trim();
     const trimmedNew = newTitle.trim();
 
@@ -235,16 +235,14 @@ export class SqliteIndexStore implements IndexStore {
       // 2. Update notes table, which cascades source_title in links and note_title in tags
       const nowIso = new Date().toISOString();
       const nowMtime = Date.now();
-      const oldPath = oldRecord.file_path;
-      const lastSlash = Math.max(oldPath.lastIndexOf("/"), oldPath.lastIndexOf("\\"));
-      const newFilePath =
-        lastSlash >= 0
-          ? `${oldPath.slice(0, lastSlash + 1)}${trimmedNew}.md`
-          : `${trimmedNew}.md`;
+      const targetFilePath =
+        newFilePath !== undefined
+          ? newFilePath
+          : oldRecord.file_path.replace(trimmedOld, trimmedNew);
 
       this.db
         .prepare("UPDATE notes SET title = ?, file_path = ?, mtime = ?, updated_at = ? WHERE title = ?")
-        .run(trimmedNew, newFilePath, nowMtime, nowIso, trimmedOld);
+        .run(trimmedNew, targetFilePath, nowMtime, nowIso, trimmedOld);
 
       this.db.exec("COMMIT;");
     } catch (err) {
@@ -253,7 +251,7 @@ export class SqliteIndexStore implements IndexStore {
     }
   }
 
-  async getAllNotesMetadata(includeDetails: boolean = false): Promise<NoteMetadata[]> {
+  async getAllNotesMetadata(): Promise<NoteMetadata[]> {
     const noteStmt = this.db.prepare(`
       SELECT title, file_path, mtime, created_at, updated_at
       FROM notes ORDER BY title ASC
@@ -266,52 +264,14 @@ export class SqliteIndexStore implements IndexStore {
       updated_at: string | null;
     }>;
 
-    if (noteRows.length === 0) {
-      return [];
-    }
-
-    if (!includeDetails) {
-      return noteRows.map((row) => ({
-        title: row.title,
-        filePath: row.file_path,
-        mtime: row.mtime,
-        createdAt: row.created_at ?? undefined,
-        updatedAt: row.updated_at ?? undefined,
-        tags: [],
-        links: [],
-      }));
-    }
-
-    const tagStmt = this.db.prepare(`
-      SELECT note_title, tag FROM tags ORDER BY tag ASC
-    `);
-    const tagRows = tagStmt.all() as Array<{ note_title: string; tag: string }>;
-    const tagsByNote = new Map<string, string[]>();
-    for (const row of tagRows) {
-      const existing = tagsByNote.get(row.note_title) || [];
-      existing.push(row.tag);
-      tagsByNote.set(row.note_title, existing);
-    }
-
-    const linkStmt = this.db.prepare(`
-      SELECT source_title, target_title FROM links ORDER BY target_title ASC
-    `);
-    const linkRows = linkStmt.all() as Array<{ source_title: string; target_title: string }>;
-    const linksByNote = new Map<string, string[]>();
-    for (const row of linkRows) {
-      const existing = linksByNote.get(row.source_title) || [];
-      existing.push(row.target_title);
-      linksByNote.set(row.source_title, existing);
-    }
-
     return noteRows.map((row) => ({
       title: row.title,
       filePath: row.file_path,
       mtime: row.mtime,
       createdAt: row.created_at ?? undefined,
       updatedAt: row.updated_at ?? undefined,
-      tags: tagsByNote.get(row.title) || [],
-      links: linksByNote.get(row.title) || [],
+      tags: [],
+      links: [],
     }));
   }
 

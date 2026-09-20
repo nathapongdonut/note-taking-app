@@ -362,6 +362,44 @@ describe("KnowledgeBaseService (Application Service Facade)", () => {
       expect(rolledBackCaller?.body).toBe("Links to [[TargetToRename]].");
     });
 
+    it("atomically rolls back both disk modifications and SQLite index rename if re-indexing referencing notes fails", async () => {
+      await service.createNote({
+        title: "TargetNote",
+        body: "Target content.",
+      });
+
+      await service.createNote({
+        title: "ReferencingNote",
+        body: "Mentions [[TargetNote]].",
+      });
+
+      // Simulate a failure during upsertNote when re-indexing referencing notes
+      const originalUpsert = indexStore.upsertNote.bind(indexStore);
+      indexStore.upsertNote = async (record) => {
+        if (record.title === "ReferencingNote") {
+          throw new Error("Simulated index failure on referencing note");
+        }
+        return originalUpsert(record);
+      };
+
+      await expect(service.renameNote("TargetNote", "NewTargetNote")).rejects.toThrow(
+        "Simulated index failure on referencing note"
+      );
+
+      // Verify disk rollback: TargetNote exists, NewTargetNote does not
+      expect(await noteRepo.exists("TargetNote")).toBe(true);
+      expect(await noteRepo.exists("NewTargetNote")).toBe(false);
+
+      // Verify SQLite rollback: index still contains TargetNote, not NewTargetNote
+      const indexedTitles = await indexStore.listAllIndexedTitles();
+      expect(indexedTitles).toContain("TargetNote");
+      expect(indexedTitles).not.toContain("NewTargetNote");
+
+      // Verify backlinks still point to TargetNote
+      expect(await service.getBacklinks("TargetNote")).toEqual(["ReferencingNote"]);
+      expect(await service.getBacklinks("NewTargetNote")).toEqual([]);
+    });
+
     it("end-to-end integration: renames note on physical filesystem, updates referencing files on disk, and preserves SQLite graph consistency", async () => {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "vault-e2e-"));
       const dbPath = path.join(tempDir, "test-index.db");

@@ -363,24 +363,7 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
       expect(records).toEqual([]);
     });
 
-    it("retrieves fast notes summary by default without querying details", async () => {
-      await indexStore.upsertNote({
-        title: "FastNote",
-        filePath: "FastNote.md",
-        mtime: 123,
-        tags: ["tag1"],
-        links: ["Link1"],
-      });
-
-      const records = await indexStore.getAllNotesMetadata();
-      expect(records.length).toBe(1);
-      expect(records[0].title).toBe("FastNote");
-      expect(records[0].mtime).toBe(123);
-      expect(records[0].tags).toEqual([]);
-      expect(records[0].links).toEqual([]);
-    });
-
-    it("retrieves all notes with their metadata, tags, and links when includeDetails is true", async () => {
+    it("retrieves notes metadata summary without querying details", async () => {
       await indexStore.upsertNote({
         title: "Beta",
         filePath: "Beta.md",
@@ -398,17 +381,28 @@ describe("SqliteIndexStore (SQLite Metadata Index Adapter)", () => {
         links: ["Beta", "Ghost"],
       });
 
-      const records = await indexStore.getAllNotesMetadata(true);
+      const records = await indexStore.getAllNotesMetadata();
       expect(records.length).toBe(2);
       expect(records[0].title).toBe("Alpha");
       expect(records[0].mtime).toBe(100);
-      expect(records[0].tags).toEqual(["tagA1", "tagA2"]);
-      expect(records[0].links).toEqual(["Beta", "Ghost"]);
-
       expect(records[1].title).toBe("Beta");
       expect(records[1].mtime).toBe(200);
-      expect(records[1].tags).toEqual(["tagB"]);
-      expect(records[1].links).toEqual(["Alpha"]);
+    });
+  });
+
+  describe("renameNote with explicit newFilePath", () => {
+    it("updates filePath using the provided canonical path", async () => {
+      await indexStore.upsertNote({
+        title: "Original",
+        filePath: "custom/path/Original.txt",
+        mtime: 100,
+        tags: [],
+      });
+
+      await indexStore.renameNote("Original", "Renamed", "custom/path/Renamed.txt");
+
+      const meta = await indexStore.getNoteMetadata("Renamed");
+      expect(meta?.filePath).toBe("custom/path/Renamed.txt");
     });
   });
 });

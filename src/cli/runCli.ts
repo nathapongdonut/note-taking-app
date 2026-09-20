@@ -28,9 +28,9 @@ Commands:
   }
 
   try {
-    // Run fast reconciliation on startup before executing queries
-    const queryCommands = new Set(["view", "search", "backlinks", "ghost-notes"]);
-    if (queryCommands.has(command)) {
+    // Run fast reconciliation on startup before executing queries and refactors
+    const syncOnStartupCommands = new Set(["view", "search", "backlinks", "ghost-notes", "rename"]);
+    if (syncOnStartupCommands.has(command)) {
       await service.reconcile();
     }
 
@@ -167,7 +167,7 @@ Commands:
 
         const result = await service.renameNote(oldTitle, newTitle);
         io.log(`Renamed note "${result.oldTitle}" to "${result.newTitle}".`);
-        io.log("Modified files:");
+        io.log("Modified notes:");
         io.log(`  • ${result.newTitle}.md`);
         for (const title of result.updatedReferencingNotes) {
           io.log(`  • ${title}.md`);

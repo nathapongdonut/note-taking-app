@@ -238,10 +238,11 @@ export class KnowledgeBaseService {
       }
     }
 
-    // Track written files for atomic rollback
+    // Track written files and index mutations for atomic rollback
     type RollbackAction =
       | { type: "save"; note: Note }
-      | { type: "delete"; title: string };
+      | { type: "delete"; title: string }
+      | { type: "indexRename"; oldTitle: string; newTitle: string };
 
     const rollbackStack: RollbackAction[] = [];
     const updatedReferencingNotes: string[] = [];
@@ -249,7 +250,7 @@ export class KnowledgeBaseService {
     try {
       // 1. Rename the main note file and update its title and self-referential links
       const nowIso = new Date().toISOString();
-      const updatedBody = RefactorService.renameWikiLinks(oldNote.body, trimmedOld, trimmedNew);
+      const updatedBody = RefactorService.refactorWikiLinks(oldNote.body, trimmedOld, trimmedNew);
       const links = NoteParser.extractWikiLinks(updatedBody);
 
       const renamedNote: Note = {
@@ -272,7 +273,7 @@ export class KnowledgeBaseService {
 
       // 2. Refactor incoming Wiki-links across all referencing notes
       for (const [refTitle, refNote] of referencingNotesMap.entries()) {
-        const newRefBody = RefactorService.renameWikiLinks(refNote.body, trimmedOld, trimmedNew);
+        const newRefBody = RefactorService.refactorWikiLinks(refNote.body, trimmedOld, trimmedNew);
         const refLinks = NoteParser.extractWikiLinks(newRefBody);
 
         const updatedRefNote: Note = {
@@ -292,6 +293,7 @@ export class KnowledgeBaseService {
 
       // 3. Update SQLite index
       await this.indexStore.renameNote(trimmedOld, trimmedNew);
+      rollbackStack.push({ type: "indexRename", oldTitle: trimmedOld, newTitle: trimmedNew });
 
       // Reconcile index for updated referencing notes so outbound links and mtimes match new body
       for (const refTitle of updatedReferencingNotes) {
@@ -324,6 +326,8 @@ export class KnowledgeBaseService {
             await this.noteRepo.save(action.note);
           } else if (action.type === "delete") {
             await this.noteRepo.delete(action.title);
+          } else if (action.type === "indexRename") {
+            await this.indexStore.renameNote(action.newTitle, action.oldTitle);
           }
         } catch {
           // preserve original error

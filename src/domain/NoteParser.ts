@@ -56,6 +56,15 @@ export class NoteParser {
   }
 
   /**
+   * Shared regex matching fenced code blocks, inline code spans, backslash escapes, and wiki-links.
+   * Group 1: Fenced code fence
+   * Group 2: Inline code ticks
+   * Group 3: Wiki-link content
+   */
+  static readonly WIKILINK_TOKEN_REGEX =
+    /(?:^|\n)([`~]{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)|(`+)[\s\S]*?\2|\\.|\[\[([^\[\]\r\n]+?)\]\]/g;
+
+  /**
    * Extracts all unique [[Target Title]] Wiki-links from markdown content,
    * ignoring code blocks (fenced and inline) and escaped characters.
    */
@@ -64,25 +73,18 @@ export class NoteParser {
       return [];
     }
 
-    // 1. Remove fenced code blocks (``` or ~~~ with at least 3 markers)
-    const noFencedCode = content.replace(
-      /(?:^|\n)([`~]{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*(?=\n|$)/g,
-      "\n"
-    );
-
-    // 2. Remove inline code spans (`...` or ``...``)
-    const noInlineCode = noFencedCode.replace(/(`+)(?:(?!\1)[\s\S])*?\1/g, " ");
-
-    // 3. Replace escaped characters (\.) with spaces
-    const unescaped = noInlineCode.replace(/\\./g, " ");
-
-    // 4. Extract [[Target Title]]
-    const matches = unescaped.matchAll(/\[\[([^\[\]\r\n]+?)\]\]/g);
+    const matches = content.matchAll(NoteParser.WIKILINK_TOKEN_REGEX);
     const links: string[] = [];
     for (const match of matches) {
-      const target = match[1].split("|")[0].trim();
-      if (target.length > 0) {
-        links.push(target);
+      const [fullMatch, fence, inlineCode, linkContent] = match;
+      if (fence || inlineCode || fullMatch.startsWith("\\")) {
+        continue;
+      }
+      if (linkContent !== undefined) {
+        const target = linkContent.split("|")[0].trim();
+        if (target.length > 0) {
+          links.push(target);
+        }
       }
     }
 
