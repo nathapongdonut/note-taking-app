@@ -81,7 +81,8 @@ export class NoteParser {
         continue;
       }
       if (linkContent !== undefined) {
-        const target = linkContent.split("|")[0].trim();
+        const pipeTarget = linkContent.split("|")[0];
+        const target = pipeTarget.split("#")[0].trim();
         if (target.length > 0) {
           links.push(target);
         }
@@ -94,6 +95,52 @@ export class NoteParser {
   private static extractFirstHeading(content: string): string | null {
     const headingMatch = content.match(/^#\s+(.+)$/m);
     return headingMatch ? headingMatch[1].trim() : null;
+  }
+
+  /**
+   * Safely refactors all [[oldTitle]] Wiki-links to [[newTitle]] in markdown content.
+   * Preserves aliases ([[oldTitle|Alias]]), code blocks (fenced and inline),
+   * escaped characters, and surrounding text untouched.
+   */
+  static refactorWikiLinks(content: string, oldTitle: string, newTitle: string): string {
+    if (!content) {
+      return "";
+    }
+
+    const trimmedOld = oldTitle.trim();
+    const trimmedNew = newTitle.trim();
+
+    if (!trimmedOld || !trimmedNew || trimmedOld === trimmedNew) {
+      return content;
+    }
+
+    return content.replace(this.WIKILINK_TOKEN_REGEX, (match, fence, inlineCode, linkContent) => {
+      // Return code blocks and escaped characters untouched
+      if (fence || inlineCode || match.startsWith("\\")) {
+        return match;
+      }
+
+      if (linkContent !== undefined) {
+        const pipeIndex = linkContent.indexOf("|");
+        const rawTarget = pipeIndex !== -1 ? linkContent.slice(0, pipeIndex) : linkContent;
+        const aliasPart = pipeIndex !== -1 ? linkContent.slice(pipeIndex) : "";
+
+        const hashIndex = rawTarget.indexOf("#");
+        if (hashIndex !== -1) {
+          const noteTitle = rawTarget.slice(0, hashIndex).trim();
+          const sectionPart = rawTarget.slice(hashIndex);
+          if (noteTitle === trimmedOld) {
+            return `[[${trimmedNew}${sectionPart}${aliasPart}]]`;
+          }
+        } else {
+          if (rawTarget.trim() === trimmedOld) {
+            return `[[${trimmedNew}${aliasPart}]]`;
+          }
+        }
+      }
+
+      return match;
+    });
   }
 
 
