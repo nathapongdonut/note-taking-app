@@ -33,7 +33,7 @@ An embedded queryable data store that caches Note metadata, tags, and link conne
 _Avoid_: Master database, cache store
 
 **Ghost Note**:
-A referenced concept that appears inside a Wiki-link but has not yet been authored as a file in the Vault.
+A referenced concept that appears inside a Wiki-link but has not yet been authored as a Note in the Vault.
 _Avoid_: Missing note, uncreated note, broken link, dangling pointer
 
 **Reconciliation**:
@@ -41,7 +41,7 @@ The process of inspecting file modification timestamps (`mtime`) on disk to sync
 _Avoid_: Refresh, reindex, reload, scan
 
 **Refactoring**:
-The automated rewriting of all incoming Wiki-links across other Notes when a Note is renamed.
-_Avoid_: Renaming, link update, link migration
+The automated rewriting of Wiki-links referencing a Note (including incoming backlinks across the Vault and self-referential links) when its title changes.
+_Avoid_: Link update, link migration, manual retargeting
 
 
