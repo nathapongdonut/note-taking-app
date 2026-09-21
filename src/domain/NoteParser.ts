@@ -81,7 +81,8 @@ export class NoteParser {
         continue;
       }
       if (linkContent !== undefined) {
-        const target = linkContent.split("|")[0].trim();
+        const pipeTarget = linkContent.split("|")[0];
+        const target = pipeTarget.split("#")[0].trim();
         if (target.length > 0) {
           links.push(target);
         }
@@ -120,15 +121,20 @@ export class NoteParser {
       }
 
       if (linkContent !== undefined) {
-        if (linkContent.includes("|")) {
-          const parts = linkContent.split("|");
-          const target = parts[0].trim();
-          if (target === trimmedOld) {
-            return `[[${trimmedNew}|${parts.slice(1).join("|")}]]`;
+        const pipeIndex = linkContent.indexOf("|");
+        const rawTarget = pipeIndex !== -1 ? linkContent.slice(0, pipeIndex) : linkContent;
+        const aliasPart = pipeIndex !== -1 ? linkContent.slice(pipeIndex) : "";
+
+        const hashIndex = rawTarget.indexOf("#");
+        if (hashIndex !== -1) {
+          const noteTitle = rawTarget.slice(0, hashIndex).trim();
+          const sectionPart = rawTarget.slice(hashIndex);
+          if (noteTitle === trimmedOld) {
+            return `[[${trimmedNew}${sectionPart}${aliasPart}]]`;
           }
         } else {
-          if (linkContent.trim() === trimmedOld) {
-            return `[[${trimmedNew}]]`;
+          if (rawTarget.trim() === trimmedOld) {
+            return `[[${trimmedNew}${aliasPart}]]`;
           }
         }
       }

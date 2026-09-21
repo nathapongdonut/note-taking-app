@@ -23,8 +23,14 @@ export class RefactorRollbackError extends Error {
 type RollbackAction =
   | { type: "save"; note: Note }
   | { type: "delete"; title: string }
-  | { type: "indexRename"; oldTitle: string; newTitle: string }
-  | { type: "indexUpsert"; record: NoteRecord };
+  | {
+      type: "indexTargetRollback";
+      oldTitle: string;
+      newTitle: string;
+      priorMeta: NoteRecord | null;
+    }
+  | { type: "indexUpsert"; record: NoteRecord }
+  | { type: "indexDelete"; title: string };
 
 export class RefactorService {
   constructor(
@@ -33,8 +39,56 @@ export class RefactorService {
   ) {}
 
   /**
-   * Renames a Note on disk and in the SQLite index, refactoring all incoming Wiki-links across the Vault.
-   * Protects vault consistency with an atomic rollback on disk or index write failures.
+   * Refactors the renamed target Note's title, body, Wiki-links, and frontmatter.
+   */
+  private refactorTargetNote(
+    note: Note,
+    oldTitle: string,
+    newTitle: string,
+    nowIso: string
+  ): Note {
+    const updatedBody = NoteParser.refactorWikiLinks(note.body, oldTitle, newTitle);
+    const links = NoteParser.extractWikiLinks(updatedBody);
+
+    return {
+      ...note,
+      title: newTitle,
+      body: updatedBody,
+      links,
+      frontmatter: {
+        ...note.frontmatter,
+        title: newTitle,
+        ...(note.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
+      },
+    };
+  }
+
+  /**
+   * Refactors incoming Wiki-links across a referencing Note without mutating its title.
+   */
+  private refactorReferencingNote(
+    note: Note,
+    oldTitle: string,
+    newTitle: string,
+    nowIso: string
+  ): Note {
+    const updatedBody = NoteParser.refactorWikiLinks(note.body, oldTitle, newTitle);
+    const links = NoteParser.extractWikiLinks(updatedBody);
+
+    return {
+      ...note,
+      body: updatedBody,
+      links,
+      frontmatter: {
+        ...note.frontmatter,
+        ...(note.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
+      },
+    };
+  }
+
+  /**
+   * Renames a Note in the Vault and SQLite index, refactoring all incoming Wiki-links across referencing Notes.
+   * Protects consistency with an atomic compensating rollback on disk or index write failures.
    */
   async renameNote(oldTitle: string, newTitle: string): Promise<RenameNoteResult> {
     const trimmedOld = oldTitle.trim();
@@ -65,56 +119,45 @@ export class RefactorService {
     for (const refTitle of referencingTitles) {
       if (refTitle === trimmedOld) continue;
       const refNote = await this.noteRepo.get(refTitle);
-      if (refNote) {
-        referencingNotesMap.set(refTitle, refNote);
+      if (!refNote) {
+        throw new Error(
+          `Cannot refactor note "${trimmedOld}": referencing note "${refTitle}" found in index does not exist in the vault.`
+        );
       }
+      referencingNotesMap.set(refTitle, refNote);
     }
 
     const rollbackStack: RollbackAction[] = [];
     const updatedReferencingNotes: string[] = [];
 
     try {
-      // 1. Rename the main note file and update its title and self-referential links
+      // 1. Rename target Note in the Vault and update its title and self-referential Wiki-links
       const nowIso = new Date().toISOString();
-      const updatedBody = NoteParser.refactorWikiLinks(oldNote.body, trimmedOld, trimmedNew);
-      const links = NoteParser.extractWikiLinks(updatedBody);
+      const renamedNote = this.refactorTargetNote(oldNote, trimmedOld, trimmedNew, nowIso);
 
-      const renamedNote: Note = {
-        ...oldNote,
-        title: trimmedNew,
-        frontmatter: {
-          ...oldNote.frontmatter,
-          title: trimmedNew,
-          ...(oldNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
-        },
-        body: updatedBody,
-        links,
-      };
-
-      await this.noteRepo.save(renamedNote);
       rollbackStack.push({ type: "delete", title: trimmedNew });
+      await this.noteRepo.save(renamedNote);
 
-      await this.noteRepo.delete(trimmedOld);
       rollbackStack.push({ type: "save", note: oldNote });
+      await this.noteRepo.delete(trimmedOld);
 
       // 2. Refactor incoming Wiki-links across all referencing notes
       const updatedNotesMap = new Map<string, Note>();
       for (const [refTitle, refNote] of referencingNotesMap.entries()) {
-        const newRefBody = NoteParser.refactorWikiLinks(refNote.body, trimmedOld, trimmedNew);
-        const refLinks = NoteParser.extractWikiLinks(newRefBody);
+        const updatedRefNote = this.refactorReferencingNote(
+          refNote,
+          trimmedOld,
+          trimmedNew,
+          nowIso
+        );
 
-        const updatedRefNote: Note = {
-          ...refNote,
-          body: newRefBody,
-          links: refLinks,
-          frontmatter: {
-            ...refNote.frontmatter,
-            ...(refNote.frontmatter.updatedAt ? { updatedAt: nowIso } : {}),
-          },
-        };
+        // Skip notes whose body did not change (e.g. backlink was in code block or stale)
+        if (updatedRefNote.body === refNote.body) {
+          continue;
+        }
 
-        await this.noteRepo.save(updatedRefNote);
         rollbackStack.push({ type: "save", note: refNote });
+        await this.noteRepo.save(updatedRefNote);
         updatedNotesMap.set(refTitle, updatedRefNote);
         updatedReferencingNotes.push(refTitle);
       }
@@ -129,15 +172,38 @@ export class RefactorService {
       }
 
       // 3. Update SQLite index
+      const priorTargetMeta = await this.indexStore.getNoteMetadata(trimmedOld);
       await this.indexStore.renameNote(trimmedOld, trimmedNew);
-      rollbackStack.push({ type: "indexRename", oldTitle: trimmedOld, newTitle: trimmedNew });
+      rollbackStack.push({
+        type: "indexTargetRollback",
+        oldTitle: trimmedOld,
+        newTitle: trimmedNew,
+        priorMeta: priorTargetMeta,
+      });
 
-      // Reconcile index for updated referencing notes so outbound links and mtimes match new body
+      // Update index for renamed target Note to match title, links, tags, and frontmatter
+      const targetMetaAfterRename = await this.indexStore.getNoteMetadata(trimmedNew);
+      if (targetMetaAfterRename) {
+        await this.indexStore.upsertNote({
+          ...targetMetaAfterRename,
+          updatedAt:
+            typeof renamedNote.frontmatter.updatedAt === "string"
+              ? renamedNote.frontmatter.updatedAt
+              : undefined,
+          tags: renamedNote.tags,
+          links: renamedNote.links,
+        });
+      }
+
+      // Update index for referencing Notes whose Wiki-links were refactored
       for (const refTitle of updatedReferencingNotes) {
         const priorMeta = priorReferencingMeta.get(refTitle);
         if (priorMeta) {
           rollbackStack.push({ type: "indexUpsert", record: priorMeta });
+        } else {
+          rollbackStack.push({ type: "indexDelete", title: refTitle });
         }
+
         const updatedNote = updatedNotesMap.get(refTitle);
         if (updatedNote) {
           await this.indexStore.upsertNote({
@@ -170,10 +236,15 @@ export class RefactorService {
             await this.noteRepo.save(action.note);
           } else if (action.type === "delete") {
             await this.noteRepo.delete(action.title);
-          } else if (action.type === "indexRename") {
+          } else if (action.type === "indexTargetRollback") {
             await this.indexStore.renameNote(action.newTitle, action.oldTitle);
+            if (action.priorMeta) {
+              await this.indexStore.upsertNote(action.priorMeta);
+            }
           } else if (action.type === "indexUpsert") {
             await this.indexStore.upsertNote(action.record);
+          } else if (action.type === "indexDelete") {
+            await this.indexStore.deleteNote(action.title);
           }
         } catch (err) {
           rollbackErrors.push(err instanceof Error ? err : new Error(String(err)));

@@ -229,6 +229,12 @@ Another outside: [[Old Note]]
       expect(result).toBe(markdown);
     });
 
+    it("refactors Wiki-links with heading anchors and optional aliases", () => {
+      const markdown = "See [[Cardiology#Anatomy]], [[Cardiology#Treatment|Therapy]], and [[#LocalHeading]].";
+      const result = NoteParser.refactorWikiLinks(markdown, "Cardiology", "Cardiovascular");
+      expect(result).toBe("See [[Cardiovascular#Anatomy]], [[Cardiovascular#Treatment|Therapy]], and [[#LocalHeading]].");
+    });
+
     it("adheres to CONTEXT.md language rules: provides refactorWikiLinks and omits renameWikiLinks", () => {
       expect(typeof NoteParser.refactorWikiLinks).toBe("function");
       expect((NoteParser as Record<string, unknown>).renameWikiLinks).toBeUndefined();

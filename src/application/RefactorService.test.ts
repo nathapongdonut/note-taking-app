@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { RefactorService, RefactorRollbackError } from "./RefactorService.js";
 import { FsNoteRepository } from "../adapters/FsNoteRepository.js";
 import { SqliteIndexStore } from "../adapters/SqliteIndexStore.js";
+import { NoteParser } from "../domain/NoteParser.js";
 
 describe("RefactorService (Application Note Refactoring)", () => {
   let tempVaultDir: string;
@@ -321,11 +322,11 @@ describe("RefactorService (Application Note Refactoring)", () => {
     });
 
     // Make upsert fail on forward execution to trigger rollback
-    let upsertCalls = 0;
+    let forwardTriggerDone = false;
     const originalUpsert = indexStore.upsertNote.bind(indexStore);
     indexStore.upsertNote = async (record) => {
-      upsertCalls++;
-      if (upsertCalls === 1 && record.title === "RefNote") {
+      if (record.title === "RefNote" && !forwardTriggerDone) {
+        forwardTriggerDone = true;
         throw new Error("Trigger index error");
       }
       return originalUpsert(record);
@@ -352,5 +353,249 @@ describe("RefactorService (Application Note Refactoring)", () => {
         "Disk unlink permission denied during rollback"
       );
     }
+  });
+
+  it("unindexes newly indexed referencing note on rollback if it was previously unindexed", async () => {
+    await noteRepo.save({
+      title: "TargetNote",
+      body: "Target content.",
+      tags: [],
+      frontmatter: { title: "TargetNote" },
+      links: [],
+    });
+    await indexStore.upsertNote({
+      title: "TargetNote",
+      filePath: "TargetNote.md",
+      mtime: Date.now(),
+      tags: [],
+      links: [],
+    });
+
+    // Referencing note exists in repo, but has NOT been indexed yet in SQLite
+    await noteRepo.save({
+      title: "UnindexedRef",
+      body: "Mentions [[TargetNote]].",
+      tags: [],
+      frontmatter: { title: "UnindexedRef" },
+      links: ["TargetNote"],
+    });
+
+    // Second referencing note
+    await noteRepo.save({
+      title: "RefTwo",
+      body: "Also mentions [[TargetNote]].",
+      tags: [],
+      frontmatter: { title: "RefTwo" },
+      links: ["TargetNote"],
+    });
+
+    // Mock getBacklinks so RefactorService discovers both
+    indexStore.getBacklinks = async () => ["UnindexedRef", "RefTwo"];
+
+    // Simulate failure on second upsert
+    let upsertCount = 0;
+    const origUpsert = indexStore.upsertNote.bind(indexStore);
+    indexStore.upsertNote = async (record) => {
+      upsertCount++;
+      if (upsertCount === 1) {
+        // First upsert for UnindexedRef succeeds
+        return origUpsert(record);
+      }
+      // Fail on second upsert to trigger rollback
+      throw new Error("Simulated failure after indexing unindexed note");
+    };
+
+    await expect(refactorService.renameNote("TargetNote", "NewTargetNote")).rejects.toThrow(
+      "Simulated failure after indexing unindexed note"
+    );
+
+    // After rollback, UnindexedRef must not remain in the index
+    const meta = await indexStore.getNoteMetadata("UnindexedRef");
+    expect(meta).toBeNull();
+  });
+
+  it("throws error if referencing note discovered in index is missing on disk in the vault", async () => {
+    await noteRepo.save({
+      title: "TargetNote",
+      body: "Target content.",
+      tags: [],
+      frontmatter: { title: "TargetNote" },
+      links: [],
+    });
+    await indexStore.upsertNote({
+      title: "TargetNote",
+      filePath: "TargetNote.md",
+      mtime: Date.now(),
+      tags: [],
+      links: [],
+    });
+
+    // Mock getBacklinks returning a title that does NOT exist on disk
+    indexStore.getBacklinks = async () => ["DeletedOrMissingNote"];
+
+    await expect(refactorService.renameNote("TargetNote", "NewTargetNote")).rejects.toThrow(
+      'Cannot refactor note "TargetNote": referencing note "DeletedOrMissingNote" found in index does not exist in the vault.'
+    );
+
+    // Target note remains untouched on disk and in index
+    expect(await noteRepo.exists("TargetNote")).toBe(true);
+    expect(await noteRepo.exists("NewTargetNote")).toBe(false);
+  });
+
+  it("restores original mtime and updatedAt metadata of target note on rollback", async () => {
+    const originalMtime = 1000000000;
+    const originalUpdatedAt = "2020-01-01T00:00:00.000Z";
+
+    await noteRepo.save({
+      title: "TargetNote",
+      body: "Target content.",
+      tags: ["tag1"],
+      frontmatter: { title: "TargetNote", updatedAt: originalUpdatedAt },
+      links: [],
+    });
+    await indexStore.upsertNote({
+      title: "TargetNote",
+      filePath: "TargetNote.md",
+      mtime: originalMtime,
+      updatedAt: originalUpdatedAt,
+      tags: ["tag1"],
+      links: [],
+    });
+
+    // Setup referencing note
+    await noteRepo.save({
+      title: "Caller",
+      body: "Mentions [[TargetNote]].",
+      tags: [],
+      frontmatter: { title: "Caller" },
+      links: ["TargetNote"],
+    });
+    await indexStore.upsertNote({
+      title: "Caller",
+      filePath: "Caller.md",
+      mtime: Date.now(),
+      tags: [],
+      links: ["TargetNote"],
+    });
+
+    // Simulate failure during referencing note index upsert
+    const origUpsert = indexStore.upsertNote.bind(indexStore);
+    indexStore.upsertNote = async (record) => {
+      if (record.title === "Caller") {
+        throw new Error("Trigger index failure on referencing note");
+      }
+      return origUpsert(record);
+    };
+
+    await expect(refactorService.renameNote("TargetNote", "NewTargetNote")).rejects.toThrow(
+      "Trigger index failure on referencing note"
+    );
+
+    // Prior target metadata must be restored exactly
+    const targetMeta = await indexStore.getNoteMetadata("TargetNote");
+    expect(targetMeta).not.toBeNull();
+    expect(targetMeta?.mtime).toBe(originalMtime);
+    expect(targetMeta?.updatedAt).toBe(originalUpdatedAt);
+    expect(targetMeta?.tags).toEqual(["tag1"]);
+  });
+
+  it("skips saving and reporting referencing notes whose content did not actually change", async () => {
+    await noteRepo.save({
+      title: "TargetNote",
+      body: "Target content.",
+      tags: [],
+      frontmatter: { title: "TargetNote" },
+      links: [],
+    });
+    await indexStore.upsertNote({
+      title: "TargetNote",
+      filePath: "TargetNote.md",
+      mtime: 1000,
+      tags: [],
+      links: [],
+    });
+
+    // CallerOne has an actual link
+    await noteRepo.save({
+      title: "CallerOne",
+      body: "Links to [[TargetNote]].",
+      tags: [],
+      frontmatter: { title: "CallerOne" },
+      links: ["TargetNote"],
+    });
+    await indexStore.upsertNote({
+      title: "CallerOne",
+      filePath: "CallerOne.md",
+      mtime: 1000,
+      tags: [],
+      links: ["TargetNote"],
+    });
+
+    // CallerTwo has a backlink in index, but in body it's inside a code block (so body won't change)
+    await noteRepo.save({
+      title: "CallerTwo",
+      body: "Code block:\n```\n[[TargetNote]]\n```",
+      tags: [],
+      frontmatter: { title: "CallerTwo" },
+      links: ["TargetNote"],
+    });
+    await indexStore.upsertNote({
+      title: "CallerTwo",
+      filePath: "CallerTwo.md",
+      mtime: 1000,
+      tags: [],
+      links: ["TargetNote"],
+    });
+
+    const result = await refactorService.renameNote("TargetNote", "RenamedTarget");
+
+    // Only CallerOne should be updated and reported
+    expect(result.updatedReferencingNotes).toEqual(["CallerOne"]);
+
+    // CallerTwo's metadata in index should remain untouched
+    const metaTwo = await indexStore.getNoteMetadata("CallerTwo");
+    expect(metaTwo?.mtime).toBe(1000);
+  });
+
+  it("discovers and refactors incoming backlinks that include heading anchors", async () => {
+    await noteRepo.save({
+      title: "TargetNote",
+      body: "# Target Header\nContent.",
+      tags: [],
+      frontmatter: { title: "TargetNote" },
+      links: [],
+    });
+    await indexStore.upsertNote({
+      title: "TargetNote",
+      filePath: "TargetNote.md",
+      mtime: Date.now(),
+      tags: [],
+      links: [],
+    });
+
+    const callerBody = "See [[TargetNote#Target Header]] and [[TargetNote#Target Header|Alias]].";
+    const extractedLinks = NoteParser.extractWikiLinks(callerBody);
+    await noteRepo.save({
+      title: "AnchorCaller",
+      body: callerBody,
+      tags: [],
+      frontmatter: { title: "AnchorCaller" },
+      links: extractedLinks,
+    });
+    await indexStore.upsertNote({
+      title: "AnchorCaller",
+      filePath: "AnchorCaller.md",
+      mtime: Date.now(),
+      tags: [],
+      links: extractedLinks,
+    });
+
+    const result = await refactorService.renameNote("TargetNote", "RenamedNote");
+    expect(result.updatedReferencingNotes).toEqual(["AnchorCaller"]);
+
+    const updatedCaller = await noteRepo.get("AnchorCaller");
+    expect(updatedCaller?.body).toBe(
+      "See [[RenamedNote#Target Header]] and [[RenamedNote#Target Header|Alias]]."
+    );
   });
 });
